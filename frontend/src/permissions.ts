@@ -17,3 +17,11 @@ export function can(role: Role, permission: Permission): boolean {
 }
 
 export const ROLES: Role[] = ["viewer", "analyst", "editor", "admin"];
+
+/** Nazwy ról zgodne z treścią zadania (pkt 13). */
+export const ROLE_LABELS: Record<Role, string> = {
+  admin: "Administracja",
+  editor: "Dodawanie, usuwanie, modyfikacja",
+  analyst: "Modyfikacja i odczyt",
+  viewer: "Odczyt",
+};

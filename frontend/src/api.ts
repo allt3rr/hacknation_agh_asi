@@ -1,6 +1,7 @@
 // Klient REST API. Token sesji jest ustawiany po zalogowaniu (setAuthToken).
 
 import type {
+  Annotation,
   Change,
   Dashboard,
   FileFormat,
@@ -9,6 +10,7 @@ import type {
   Role,
   Run,
   Session,
+  Settings,
   SignatureList,
   Target,
   TargetPatch,
@@ -108,21 +110,38 @@ export const api = {
     list: () => request<Run[]>("GET", "/runs"),
     start: (maxMinutes?: number) =>
       request<{ status: string }>("POST", maxMinutes ? `/runs?max_minutes=${maxMinutes}` : "/runs"),
+    updateNote: (id: string, note: string) => request<void>("PUT", `/runs/${id}`, { json: { note } }),
     changes: (id: string) => request<Change[]>("GET", `/runs/${id}/changes`),
     observations: (id: string) => request<Observation[]>("GET", `/runs/${id}/observations`),
     exportFile: async (id: string, format: "csv" | "json") => {
       const response = await send("GET", `/runs/${id}/export?format=${format}`);
       return response.blob();
     },
-    sendToDefectDojo: (id: string) => request<unknown>("POST", `/runs/${id}/defectdojo`),
+    /** Bez `keys` wysyłany jest cały skan. */
+    sendToDefectDojo: (id: string, keys?: string[]) =>
+      request<unknown>("POST", `/runs/${id}/defectdojo`, keys ? { json: { keys } } : {}),
+    compare: (from: string, to: string) =>
+      request<Change[]>("GET", `/diff?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
     importResults: (format: FileFormat, content: string) =>
       request<{ run_id: string }>("POST", `/results/import?format=${format}`, { text: content }),
+  },
+
+  annotations: {
+    list: () => request<Annotation[]>("GET", "/annotations"),
+    save: (annotation: Annotation) => request<void>("PUT", "/annotations", { json: annotation }),
   },
 
   signatures: {
     list: () => request<SignatureList>("GET", "/signatures"),
     add: (yaml: string) => request<{ id: string; active_signatures: number }>("POST", "/signatures", { json: { yaml } }),
+    update: (id: string, change: { yaml?: string; enabled?: boolean }) =>
+      request<{ id: string; active_signatures: number }>("PUT", `/signatures/${id}`, { json: change }),
     remove: (id: string) => request<void>("DELETE", `/signatures/${id}`),
+  },
+
+  settings: {
+    get: () => request<Settings>("GET", "/settings"),
+    save: (settings: Settings) => request<void>("PUT", "/settings", { json: settings }),
   },
 
   users: {

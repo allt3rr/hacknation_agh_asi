@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { errorMessage } from "./utils";
 
 /**
@@ -25,17 +26,17 @@ export function useApiData<T>(load: () => Promise<T>) {
   return { data, error, reload };
 }
 
-export interface Notice {
-  kind: "info" | "error";
-  text: string;
-}
+// Błędy wiszą dłużej i można je zamknąć ręcznie (WCAG 2.2.1); najechanie kursorem wstrzymuje licznik.
+const ERROR_DURATION_MS = 10_000;
 
-/** Komunikat dla użytkownika po akcji (sukces lub błąd). */
+/** Powiadomienie po akcji (sukces lub błąd) jako toast Sonner z shadcn/ui. */
 export function useNotice() {
-  const [notice, setNotice] = useState<Notice | null>(null);
-
-  const info = useCallback((text: string) => setNotice({ kind: "info", text }), []);
-  const error = useCallback((e: unknown) => setNotice({ kind: "error", text: errorMessage(e) }), []);
+  const info = useCallback((text: string) => {
+    toast.success(text);
+  }, []);
+  const error = useCallback((e: unknown) => {
+    toast.error(errorMessage(e), { duration: ERROR_DURATION_MS });
+  }, []);
 
   /** Wykonuje akcję i w razie wyjątku pokazuje błąd. */
   const run = useCallback(
@@ -49,5 +50,5 @@ export function useNotice() {
     [error],
   );
 
-  return { notice, info, error, run };
+  return { info, error, run };
 }

@@ -3,6 +3,7 @@
 *.rs.bk
 
 # Frontend
+/node_modules/
 /frontend/node_modules/
 /frontend/dist/
 
@@ -12,6 +13,8 @@
 *.db-shm
 *.db-wal
 .env
+/package.json
+/package-lock.json
 
 # IDE i narzędzia lokalne
 .idea/
@@ -22,3 +25,5 @@ openspec/
 # Materiały konkursowe (nie trafiają do repozytorium)
 AGH - Pełna treść zadania konkursowego.pdf
 AGH - Regulamin zadania konkursowego.pdf
+/Cargo.lock
+/asi_import.csv

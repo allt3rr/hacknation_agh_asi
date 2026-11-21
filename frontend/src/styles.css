@@ -1,17 +1,20 @@
 @import "tailwindcss";
 
-/* Kolory jako tokeny Tailwinda: bg-surface, text-muted, border-line itd. */
+/* Kolory jako tokeny Tailwinda: bg-surface, text-muted, border-line itd.
+   Kolory tekstu statusów mają kontrast >= 4.5:1 (WCAG 1.4.3) na tle bg i surface,
+   a `field` (obramowanie pól formularza) >= 3:1 (WCAG 1.4.11). */
 @theme {
   --color-bg: #f6f7f9;
   --color-surface: #ffffff;
   --color-fg: #1d2330;
   --color-muted: #667085;
   --color-line: #e4e7ec;
+  --color-field: #7b8494;
   --color-accent: #2563eb;
   --color-accent-fg: #ffffff;
-  --color-green: #16a34a;
+  --color-green: #15803d;
   --color-red: #dc2626;
-  --color-orange: #d97706;
+  --color-orange: #b45309;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -21,8 +24,12 @@
     --color-fg: #e6e9ef;
     --color-muted: #98a2b3;
     --color-line: #283244;
+    --color-field: #6b7a94;
     --color-accent: #60a5fa;
     --color-accent-fg: #0f141c;
+    --color-green: #4ade80;
+    --color-red: #f87171;
+    --color-orange: #fbbf24;
   }
 }
 
@@ -36,11 +43,16 @@
   input,
   select,
   textarea {
-    @apply rounded-md border border-line bg-bg px-2 py-1.5;
+    @apply rounded-md border border-field bg-bg px-2 py-1.5;
   }
 
   button {
     @apply cursor-pointer rounded-md bg-accent px-3.5 py-[7px] text-accent-fg disabled:cursor-default disabled:opacity-50;
+  }
+
+  /* Wyraźny wskaźnik fokusu dla klawiatury (WCAG 2.4.7). */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
   }
 
   th,

@@ -42,6 +42,7 @@ export interface Run {
   finished_at: string | null;
   duration_secs: number | null;
   stats_json: string | null;
+  note: string | null;
 }
 
 export interface RunStats {
@@ -50,6 +51,7 @@ export interface RunStats {
   changes?: number;
   pending?: number;
   failed?: number;
+  error?: string;
 }
 
 export type ChangeKind = "new" | "gone" | "changed" | "host_inactive" | "host_returned";
@@ -80,6 +82,15 @@ export interface HttpInfo {
   headers: Record<string, string>;
   cookies: string[];
   redirects: string[];
+  tls: TlsCert | null;
+}
+
+export interface TlsCert {
+  subject: string;
+  issuer: string;
+  not_before: string;
+  not_after: string;
+  sha256: string;
 }
 
 export interface Observation {
@@ -147,6 +158,35 @@ export interface User {
   username: string;
   role: Role;
   created_at: string;
+}
+
+/** Ręczna adnotacja usługi (klucz ip:port/proto), zachowywana między skanami. */
+export interface Annotation {
+  key: string;
+  tags: string[];
+  note: string | null;
+  severity: string | null;
+  updated_by?: string;
+  updated_at?: string;
+}
+
+export interface ScheduleWindow {
+  /** HH:MM, czas lokalny serwera */
+  start: string;
+  end: string;
+  /** mon..sun; pusta lista = codziennie */
+  days: string[];
+}
+
+export interface Settings {
+  schedule: {
+    enabled: boolean;
+    every_hours: number;
+    windows: ScheduleWindow[];
+  };
+  global_max_rate: number;
+  concurrency: number;
+  http_concurrency: number;
 }
 
 export type FileFormat = "csv" | "json" | "txt";

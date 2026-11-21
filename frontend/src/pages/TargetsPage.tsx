@@ -2,8 +2,8 @@ import { useState } from "react";
 import { api } from "../api";
 import { Card } from "../components/Card";
 import { DataTable } from "../components/DataTable";
+import { EditableText } from "../components/EditableText";
 import { FilePicker } from "../components/FilePicker";
-import { NoticeBar } from "../components/NoticeBar";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
 import type { ImportSummary, Role, Target, TargetPatch } from "../types";
@@ -18,7 +18,7 @@ function summaryText(summary: ImportSummary): string {
 
 export function TargetsPage({ role }: { role: Role }) {
   const { data: targets, error, reload } = useApiData(api.targets.list);
-  const { notice, info, run } = useNotice();
+  const { info, run } = useNotice();
   const [text, setText] = useState("");
 
   const addManually = () =>
@@ -36,23 +36,35 @@ export function TargetsPage({ role }: { role: Role }) {
 
   return (
     <>
-      <NoticeBar notice={notice} />
 
       {can(role, "create") && (
         <Card title="Dodaj cele">
-          <textarea className="min-h-[110px] w-full" placeholder={PLACEHOLDER} value={text} onChange={(e) => setText(e.target.value)} />
+          <label htmlFor="targets-text" className="mb-1 block">
+            Adresy IP, zakresy CIDR lub domeny (jeden na linię)
+          </label>
+          <textarea
+            id="targets-text"
+            className="min-h-[110px] w-full font-mono"
+            placeholder={PLACEHOLDER}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
           <div className="my-2 flex flex-wrap items-center gap-2">
             <button onClick={addManually} disabled={!text.trim()}>
               Dodaj ręcznie
             </button>
             <span className="text-muted">lub plik CSV (target,tags,note), JSON albo TXT:</span>
-            <FilePicker accept=".csv,.json,.txt" buttonLabel="Importuj plik" onSubmit={importFile} />
+            <FilePicker accept=".csv,.json,.txt" label="Plik z celami (CSV, JSON lub TXT)" buttonLabel="Importuj plik" onSubmit={importFile} />
           </div>
         </Card>
       )}
 
       <Card title="Lista celów">
-        {error && <p className="my-3.5 text-red">{error}</p>}
+        {error && (
+          <p role="alert" className="my-3.5 text-red">
+            {error}
+          </p>
+        )}
         <TargetTable targets={targets ?? []} role={role} onChanged={reload} run={run} />
       </Card>
     </>
@@ -87,6 +99,9 @@ function TargetTable({ targets, role, onChanged, run }: TargetTableProps) {
     <DataTable
       rows={targets}
       rowKey={(t) => t.id}
+      label="Lista celów"
+      emptyText="Brak celów"
+      filterBy={(t) => [t.value, t.kind, ...t.tags, t.note].join(" ")}
       columns={[
         { header: "Cel", render: (t) => t.value },
         { header: "Typ", render: (t) => t.kind },
@@ -95,6 +110,7 @@ function TargetTable({ targets, role, onChanged, run }: TargetTableProps) {
           render: (t) =>
             editable ? (
               <EditableText
+                label={`Tagi celu ${t.value}`}
                 value={t.tags.join(", ")}
                 onSave={(value) => update(t, { tags: value.split(",").map((s) => s.trim()).filter(Boolean) })}
               />
@@ -105,13 +121,18 @@ function TargetTable({ targets, role, onChanged, run }: TargetTableProps) {
         {
           header: "Notatka",
           render: (t) =>
-            editable ? <EditableText value={t.note ?? ""} onSave={(note) => update(t, { note })} /> : t.note,
+            editable ? (
+              <EditableText label={`Notatka celu ${t.value}`} value={t.note ?? ""} onSave={(note) => update(t, { note })} />
+            ) : (
+              t.note
+            ),
         },
         {
           header: "Skanowany",
           render: (t) => (
             <input
               type="checkbox"
+              aria-label={`Skanuj ${t.value}`}
               checked={t.enabled}
               disabled={!editable}
               onChange={(e) => update(t, { enabled: e.target.checked })}
@@ -122,24 +143,12 @@ function TargetTable({ targets, role, onChanged, run }: TargetTableProps) {
           header: "",
           render: (t) =>
             can(role, "delete") && (
-              <button className={BTN_SECONDARY} onClick={() => remove(t)}>
+              <button className={BTN_SECONDARY} aria-label={`Usuń cel ${t.value}`} onClick={() => remove(t)}>
                 Usuń
               </button>
             ),
         },
       ]}
-    />
-  );
-}
-
-/** Pole tekstowe zapisywane po opuszczeniu (blur), tylko jeśli wartość się zmieniła. */
-function EditableText({ value, onSave }: { value: string; onSave: (value: string) => void }) {
-  const [draft, setDraft] = useState(value);
-  return (
-    <input
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => draft !== value && onSave(draft)}
     />
   );
 }

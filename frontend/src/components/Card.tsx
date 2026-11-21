@@ -1,17 +1,24 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode, type Ref } from "react";
 
 interface CardProps {
   title?: string;
   actions?: ReactNode;
   children: ReactNode;
+  /** Pozwala przenieść fokus na nagłówek (np. po otwarciu szczegółów). */
+  headingRef?: Ref<HTMLHeadingElement>;
 }
 
-export function Card({ title, actions, children }: CardProps) {
+export function Card({ title, actions, children, headingRef }: CardProps) {
+  const headingId = useId();
   return (
-    <section className="mb-4 rounded-[10px] border border-line bg-surface p-4">
+    <section className="mb-4 rounded-[10px] border border-line bg-surface p-4" aria-labelledby={title ? headingId : undefined}>
       {(title || actions) && (
-        <div className="mb-2 flex items-center justify-between gap-2">
-          {title && <h3 className="text-[1.17em] font-bold">{title}</h3>}
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          {title && (
+            <h2 id={headingId} ref={headingRef} tabIndex={headingRef ? -1 : undefined} className="text-[1.17em] font-bold outline-none">
+              {title}
+            </h2>
+          )}
           {actions}
         </div>
       )}
