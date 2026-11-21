@@ -92,7 +92,7 @@ export function RunsPage({ session }: { session: Session }) {
               <button onClick={startScan} disabled={scanActive}>
                 {scanActive ? "Skan w toku..." : "Uruchom skan"}
               </button>
-              <span className="text-muted">Okna czasowe, porty i limity tempa ustawia konfiguracja backendu.</span>
+              <span className="text-muted">Okna czasowe i częstotliwość: zakładka Harmonogram. Porty i limit tempa: plik konfiguracji skanu.</span>
             </div>
           )}
           {can(session, "targets.create") && (

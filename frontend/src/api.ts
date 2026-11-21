@@ -10,6 +10,7 @@ import type {
   ResultRow,
   Role,
   Run,
+  Schedule,
   Session,
   SignatureList,
   Target,
@@ -131,6 +132,11 @@ export const api = {
       request<{ run_id: string; observations: number; changes: number }>("POST", `/results/import?format=${format}`, {
         text: content,
       }),
+  },
+
+  schedule: {
+    get: () => request<Schedule>("GET", "/schedule"),
+    save: (schedule: Schedule) => request<void>("PUT", "/schedule", { json: schedule }),
   },
 
   overrides: {
