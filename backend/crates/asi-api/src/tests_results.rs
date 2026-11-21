@@ -558,3 +558,92 @@ async fn defectdojo_export(db: PgPool) {
     assert!(payload.contains("WordPress na 10.0.0.7:80"));
     assert!(!payload.contains(SECRET));
 }
+
+#[sqlx::test(migrator = "asi_db::MIGRATOR")]
+async fn scan_pushes_to_defectdojo_automatically(db: PgPool) {
+    let hits: Arc<Mutex<Vec<String>>> = Arc::default();
+    let store = hits.clone();
+    let app = axum::Router::new().route(
+        "/api/v2/import-scan/",
+        axum::routing::post(move |b: String| {
+            let store = store.clone();
+            async move {
+                store.lock().unwrap().push(b);
+                axum::Json(json!({ "test": 1 }))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let fake = FakeRunner {
+        open_port: 22,
+        ..Default::default()
+    };
+    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../signatures"));
+    let cfg = ScanConfig {
+        recheck_missing: false,
+        ..Default::default()
+    };
+    let svc = ScanService::new(Ok(cfg.clone()), AnyRunner::Fake(fake.clone()), dir.clone());
+    let dd = |port: u16| {
+        Some(DefectDojo {
+            url: format!("http://127.0.0.1:{port}"),
+            token: "t".into(),
+            engagement: 1,
+        })
+    };
+    let st = prepared(&db)
+        .await
+        .with_scans(svc)
+        .with_defectdojo(dd(port));
+    let admin = cookie_pair(&login_as(&st, "admin", "admin").await);
+    call(
+        &st,
+        "POST",
+        "/api/v1/targets",
+        Some(&admin),
+        Some(json!({ "text": "10.0.0.1" })),
+    )
+    .await;
+
+    let wait_done = |st: AppState, cookie: String| async move {
+        for _ in 0..200 {
+            let runs = body(call(&st, "GET", "/api/v1/runs", Some(&cookie), None).await).await;
+            if runs[0]["status"] != "running" {
+                return runs[0]["status"].as_str().unwrap().to_string();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!("skan nie zakończył się");
+    };
+
+    assert_eq!(
+        call(&st, "POST", "/api/v1/runs", Some(&admin), None)
+            .await
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(wait_done(st.clone(), admin.clone()).await, "done");
+    for _ in 0..100 {
+        if !hits.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let sent = hits.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1, "jedna automatyczna wysyłka po skanie");
+    assert!(sent[0].contains("Generic Findings Import"));
+
+    // DefectDojo niedostępne: skan nadal kończy się sukcesem
+    let svc = ScanService::new(Ok(cfg), AnyRunner::Fake(fake), dir);
+    let st = st.with_scans(svc).with_defectdojo(dd(1));
+    assert_eq!(
+        call(&st, "POST", "/api/v1/runs", Some(&admin), None)
+            .await
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(wait_done(st.clone(), admin.clone()).await, "done");
+}

@@ -285,6 +285,7 @@ async fn execute(
         match publish(&st.db, &st.crypto, run_id, &owner, &input).await {
             Ok(PublishOutcome::Published { changes }) => {
                 tracing::info!(%run_id, status = status.as_str(), changes, "przebieg opublikowany");
+                crate::defectdojo::push_after_scan(st, run_id).await;
                 return;
             }
             Ok(PublishOutcome::LeaseLost) => {

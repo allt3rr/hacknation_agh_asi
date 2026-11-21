@@ -54,6 +54,9 @@ services:
       # konfigurację skanu i sygnatury można zmieniać bez przebudowy obrazu
       - ./${ASI_SCAN_CONFIG:-backend/config/scan.toml}:/app/config/scan.toml:ro
       - ./signatures:/app/signatures:ro
+    # DefectDojo uruchomione na hoście (np. ASI_DD_URL=http://host.docker.internal:8081)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:${ASI_PORT:-8080}:8080"
     networks:

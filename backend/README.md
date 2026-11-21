@@ -48,7 +48,7 @@ DATABASE_URL=postgres://asi:asi@127.0.0.1:5432/asi cargo test
 | `ASI_SESSION_TTL_HOURS` | `12` | czas życia sesji |
 | `ASI_SCAN_CONFIG` | — (wartości domyślne) | plik TOML skanu, przykład: `config/scan.toml`; błąd w pliku blokuje skany (409) i harmonogram |
 | `ASI_SIGNATURES_DIR` | `signatures` | katalog wbudowanych sygnatur YAML |
-| `ASI_DD_URL`, `ASI_DD_TOKEN`, `ASI_DD_ENGAGEMENT` | — | DefectDojo (wszystkie trzy albo brak integracji) |
+| `ASI_DD_URL`, `ASI_DD_TOKEN`, `ASI_DD_ENGAGEMENT` | — | DefectDojo (wszystkie trzy albo brak integracji); po każdym opublikowanym skanie wyniki są wysyłane automatycznie, błąd wysyłki tylko w logu |
 | `RUST_LOG` | `info,sqlx=warn` | poziom logów |
 
 | Metoda | Ścieżka | Uprawnienie | Opis |

@@ -26,7 +26,7 @@ localhost i sieć labu; hasło zmienisz w zakładce Użytkownicy.
 | `ASI_DB_PASSWORD` | `asi-demo` | hasło bazy |
 | `ASI_SCAN_CONFIG` | `backend/config/scan.toml` | plik konfiguracji skanu (porty, limity, okna czasowe) |
 | `ASI_SESSION_TTL_HOURS`, `ASI_COOKIE_SECURE` | `12`, `false` | sesja; `true` za HTTPS |
-| `ASI_DD_URL`, `ASI_DD_TOKEN`, `ASI_DD_ENGAGEMENT` | — | DefectDojo |
+| `ASI_DD_URL`, `ASI_DD_TOKEN`, `ASI_DD_ENGAGEMENT` | — | DefectDojo: wyniki są wysyłane automatycznie po każdym skanie (błąd tylko w logu) i ręcznie przyciskiem; DefectDojo na hoście: `http://host.docker.internal:8081` |
 
 ## Laboratorium i scenariusz dwóch przebiegów
 
