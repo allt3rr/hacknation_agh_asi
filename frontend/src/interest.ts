@@ -18,7 +18,7 @@ const SEVERITY_BONUS: Record<string, number> = { critical: 40, high: 30, medium:
 
 export function interestScore(row: ResultRow): number {
   const detections = row.technologies.reduce((sum, d) => sum + ((CATEGORY_WEIGHTS[d.category] ?? 5) * d.confidence) / 100, 0);
-  return Math.min(100, Math.round(detections + (SEVERITY_BONUS[row.severity ?? ""] ?? 0)));
+  return Math.min(100, Math.round(detections + (SEVERITY_BONUS[(row.severity ?? "").toLowerCase()] ?? 0)));
 }
 
 export function interestLabel(score: number): string {

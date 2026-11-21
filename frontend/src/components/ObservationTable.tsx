@@ -7,6 +7,8 @@ import { BADGE, BTN_SECONDARY, errorMessage } from "../utils";
 import { DataTable, type Column } from "./DataTable";
 
 const STATUSES = ["", "open", "false_positive", "accepted", "fixed"];
+// Wartości przyjmowane przez DefectDojo; backend przekazuje priorytet do findingu bez zmian.
+const SEVERITIES = ["", "Info", "Low", "Medium", "High", "Critical"];
 
 function DetectionBadge({ detection }: { detection: Detection }) {
   const version = detection.version ? ` ${detection.version}` : "";
@@ -55,7 +57,9 @@ interface Props {
 
 /** Usługi przebiegu po korektach analityka; surowy pomiar widoczny, gdy korekta go zmienia. */
 export function ObservationTable({ rows, editable, onChanged, onError }: Props) {
-  const [selected, setSelected] = useState<ResultRow | null>(null);
+  // id zamiast obiektu: po zapisie korekty wiersze przychodzą od nowa, a szczegóły mają pokazać świeże dane
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = rows.find((r) => r.id === selectedId) ?? null;
   const [grouped, setGrouped] = useState(false);
   // Najciekawsze usługi na górze (w obrębie bieżącej strony wyników).
   const sorted = useMemo(() => [...rows].sort((a, b) => interestScore(b) - interestScore(a)), [rows]);
@@ -134,7 +138,7 @@ export function ObservationTable({ rows, editable, onChanged, onError }: Props) 
     {
       header: "",
       render: (o) => (
-        <button className={BTN_SECONDARY} aria-label={`Szczegóły usługi ${o.key}`} onClick={() => setSelected(o)}>
+        <button className={BTN_SECONDARY} aria-label={`Szczegóły usługi ${o.key}`} onClick={() => setSelectedId(o.id)}>
           Szczegóły
         </button>
       ),
@@ -180,12 +184,21 @@ export function ObservationTable({ rows, editable, onChanged, onError }: Props) 
           filterBy={(o) => [o.key, o.hostname, serviceText(o), o.http?.title, o.status, o.note, ...o.technologies.map((d) => d.name)].join(" ")}
         />
       )}
-      {selected && <ObservationDetails key={selected.id} row={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <ObservationDetails key={selected.id} row={selected} onSave={editable ? save : undefined} onClose={() => setSelectedId(null)} />
+      )}
     </>
   );
 }
 
-function ObservationDetails({ row: o, onClose }: { row: ResultRow; onClose: () => void }) {
+interface DetailsProps {
+  row: ResultRow;
+  /** Zapis korekty pola; brak = tylko odczyt. */
+  onSave?: (row: ResultRow, field: string, value: string) => void;
+  onClose: () => void;
+}
+
+function ObservationDetails({ row: o, onSave, onClose }: DetailsProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const http = o.http;
 
@@ -220,6 +233,22 @@ function ObservationDetails({ row: o, onClose }: { row: ResultRow; onClose: () =
         )}
         {http && (
           <>
+            <dt>Certyfikat TLS</dt>
+            <dd>
+              {http.tls ? (
+                <>
+                  podmiot: {http.tls.subject}
+                  <br />
+                  wystawca: {http.tls.issuer}
+                  <br />
+                  ważny: {http.tls.not_before} – {http.tls.not_after}
+                  <br />
+                  <span className="text-muted">SHA-256: {http.tls.sha256}</span>
+                </>
+              ) : (
+                "brak"
+              )}
+            </dd>
             <dt>Kod HTTP</dt>
             <dd>{http.status}</dd>
             <dt>Tytuł strony</dt>
@@ -278,6 +307,40 @@ function ObservationDetails({ row: o, onClose }: { row: ResultRow; onClose: () =
           )}
         </>
       )}
+
+      {onSave && <CorrectionForm row={o} onSave={onSave} />}
     </section>
+  );
+}
+
+/** Korekty analityka (`/overrides`): zachowywane przy kolejnych skanach, widoczne w eksporcie i DefectDojo. */
+function CorrectionForm({ row: o, onSave }: { row: ResultRow; onSave: (row: ResultRow, field: string, value: string) => void }) {
+  const fields: [string, string, string | null][] = [
+    ["service", "Serwis", o.service],
+    ["product", "Produkt", o.product],
+    ["version", "Wersja", o.version],
+    ["owner", "Właściciel", o.owner],
+  ];
+  return (
+    <>
+      <h4 className="mt-3 font-semibold">Korekta wyniku (zachowywana przy kolejnych skanach)</h4>
+      <div className="my-2 grid gap-2 sm:grid-cols-[max-content_1fr] sm:items-center">
+        <label htmlFor="correction-severity">Priorytet</label>
+        <select id="correction-severity" className="justify-self-start" value={o.severity ?? ""} onChange={(e) => onSave(o, "severity", e.target.value)}>
+          {SEVERITIES.map((s) => (
+            <option key={s} value={s}>
+              {s || "—"}
+            </option>
+          ))}
+        </select>
+        {fields.map(([field, label, value]) => (
+          <div key={field} className="contents">
+            <span aria-hidden="true">{label}</span>
+            <EditableText label={`${label} ${o.key}`} value={value ?? ""} onSave={(v) => onSave(o, field, v)} />
+          </div>
+        ))}
+      </div>
+      <p className="text-muted">Puste pole przywraca wartość z pomiaru. Zapis po wyjściu z pola lub klawiszem Enter.</p>
+    </>
   );
 }

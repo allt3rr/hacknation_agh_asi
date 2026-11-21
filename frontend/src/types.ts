@@ -94,6 +94,15 @@ export interface HttpView {
   blocked_redirects: string[];
   headers: Record<string, string>;
   cookies: { name: string; attributes: string[] }[];
+  tls: TlsCert | null;
+}
+
+export interface TlsCert {
+  subject: string;
+  issuer: string;
+  not_before: string;
+  not_after: string;
+  sha256: string;
 }
 
 /** Wynik po korektach analityka; surowy pomiar w `raw_*`. */

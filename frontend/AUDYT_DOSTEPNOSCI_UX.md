@@ -62,7 +62,7 @@ Stan po scaleniu z `main` (nowy backend `backend/` na PostgreSQL, API `/api/v1`)
 | 2. Podział na podgrupy | ⚠️ | robi backend; UI pokazuje pokrycie (zaplanowane/zeskanowane/zaległe) |
 | 3–4. Aktywne hosty, usługi | ✅ | |
 | 5. Tytuł, kod HTTP, nagłówki, ciasteczka, przekierowania | ✅ 🆕 | panel „Szczegóły” usługi (nagłówki, przekierowania, zablokowane przekierowania, ciasteczka z atrybutami) |
-| 5. Certyfikat TLS | ❌ | `HttpView` w API v1 nie zawiera certyfikatu |
+| 5. Certyfikat TLS | ✅ 🆕 | API v1 zwraca `http.tls`; pokazany w szczegółach usługi (podmiot, wystawca, ważność, SHA-256) |
 | 6–7. CMS, framework, IoT, staging, panel admina | ✅ 🆕 | polskie kategorie, dowody detekcji w szczegółach |
 | 8. Porównanie kolejnych przebiegów | ✅ | „Zmiany” przy przebiegu |
 | Porównanie dwóch dowolnych skanów | ❌ | brak endpointu porównania w API v1 |
@@ -70,14 +70,14 @@ Stan po scaleniu z `main` (nowy backend `backend/` na PostgreSQL, API `/api/v1`)
 | 10. Własne sygnatury | ✅ | dodawanie, edycja (nowa wersja), wyłączanie |
 | 11. Formularz: ręcznie + CSV/JSON | ✅ | |
 | 12–13. RBAC i 4 role | ✅ 🆕 | role nazwane jak w zadaniu |
-| 14. Edycja niezależnie od skanu | ✅ | cele (tagi, notatka, wykluczenie), korekty wyników (status, notatka) przez `/overrides` |
+| 14. Edycja niezależnie od skanu | ✅ 🆕 | cele (tagi, notatka, wykluczenie); korekty wyników przez `/overrides`: status i notatka w tabeli, priorytet (`Info`–`Critical`, trafia do DefectDojo), serwis, produkt, wersja i właściciel w szczegółach usługi. Korekty są w eksporcie (`asi-core/src/export.rs`) |
 | 15. Czytelny interfejs, dashboard | ✅ 🆕 | sekcje 2 i 3 |
-| Konfiguracja skanu z UI: okno czasowe, częstotliwość | ❌ | tylko konfiguracja backendu; brak endpointu ustawień |
-| Ograniczanie tempa z UI | ❌ | jw. |
-| Edycja danych skanu (np. notatka przebiegu) | ❌ | brak endpointu |
+| Konfiguracja skanu: okno czasowe, częstotliwość | ✅ | plik `backend/config/scan.toml`; zmiana z UI nie jest wymagana, brak endpointu |
+| Ograniczanie tempa | ✅ | `global_max_rate` w `scan.toml` |
+| Edycja danych skanów i wyników | ✅ | korekty wyników jw.; edycja metadanych przebiegu (np. notatki) poza zakresem, brak endpointu |
 | Eksport JSON/CSV | ✅ | |
 | Mile widziane: różnice zależne od pory dnia | 🆕 ⚠️ | średnie hostów/usług wg pory startu skanu (z `coverage`); agregat per skan |
-| Mile widziane: ocena „ciekawości” | 🆕 | kolumna „Ocena” 0–100 (kategoria × pewność + `severity`), sortowanie w obrębie strony wyników |
+| Mile widziane: ocena „ciekawości” | 🆕 | kolumna „Ocena” 0–100 (kategoria × pewność + priorytet z korekty), sortowanie w obrębie strony wyników |
 | Mile widziane: grupowanie podobnych usług | 🆕 | przełącznik w tabeli usług (w obrębie strony wyników) |
 | Mile widziane: tagi | ✅ | cele |
 | Mile widziane: eksport wybranych obserwacji do DefectDojo | ❌ | API v1 wysyła cały przebieg |
