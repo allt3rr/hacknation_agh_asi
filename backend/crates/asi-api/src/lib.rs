@@ -107,6 +107,7 @@ pub fn router(state: AppState) -> Router {
             patch(manage::update_user).delete(manage::delete_user),
         )
         .route("/admin/audit", get(manage::list_audit))
+        .route("/schedule", get(scans::get_schedule).put(scans::put_schedule))
         .route("/runs", get(scans::list_runs).post(scans::post_run))
         .route("/runs/{id}", get(scans::get_run))
         .route("/runs/{id}/cancel", post(scans::cancel_run))

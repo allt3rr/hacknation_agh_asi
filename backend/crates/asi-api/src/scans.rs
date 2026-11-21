@@ -9,7 +9,7 @@ use asi_db::audit::{self, Entry};
 use asi_db::results::{publish, PublishInput, PublishOutcome};
 use asi_db::runs::{self, RunView, HEARTBEAT_SECS};
 use asi_fingerprint::SignatureSet;
-use asi_scanner::config::{window_decision, ScanConfig, WindowDecision};
+use asi_scanner::config::{window_decision, ScanConfig, ScheduleConfig, WindowDecision};
 use asi_scanner::http::Limits;
 use asi_scanner::nmap::{AnyRunner, NmapOptions, NmapRunner};
 use asi_scanner::{CancellationToken, Plan, Scanner};
@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tokio::time::Instant;
 use uuid::Uuid;
@@ -37,6 +37,8 @@ pub struct ScanService {
     pub owner: String,
     pub clock: Clock,
     active: Mutex<HashMap<Uuid, CancellationToken>>,
+    /// Harmonogram (okna, częstotliwość): z pliku, a po zapisie z interfejsu z bazy. Czytany przy każdym starcie.
+    schedule: RwLock<ScheduleConfig>,
 }
 
 impl ScanService {
@@ -45,6 +47,7 @@ impl ScanService {
         runner: AnyRunner,
         signatures_dir: PathBuf,
     ) -> Self {
+        let schedule = cfg.as_ref().map(|c| c.schedule.clone()).unwrap_or_default();
         Self {
             cfg,
             runner: Arc::new(runner),
@@ -52,7 +55,16 @@ impl ScanService {
             owner: format!("asi-{}", Uuid::new_v4()),
             clock: Arc::new(|| Local::now().naive_local()),
             active: Mutex::default(),
+            schedule: RwLock::new(schedule),
         }
+    }
+
+    pub fn schedule(&self) -> ScheduleConfig {
+        self.schedule.read().unwrap().clone()
+    }
+
+    fn set_schedule(&self, schedule: ScheduleConfig) {
+        *self.schedule.write().unwrap() = schedule;
     }
 
     pub fn with_clock(mut self, clock: Clock) -> Self {
@@ -87,8 +99,8 @@ pub async fn start_run(st: &AppState, triggered_by: Option<Uuid>) -> Result<Uuid
         .cfg
         .clone()
         .map_err(|e| StartError::Refused(format!("Błędna konfiguracja skanu: {e}")))?;
-    let windows = cfg
-        .schedule
+    let windows = svc
+        .schedule()
         .windows()
         .map_err(|e| StartError::Refused(format!("Błędne okno czasowe: {e:#}")))?;
     let now = (svc.clock)();
@@ -314,22 +326,33 @@ pub fn is_due(
     }
 }
 
-/// Pętla harmonogramu w `asi serve`. Błędna konfiguracja okien wyłącza harmonogram (z logiem).
+/// Wczytuje harmonogram zapisany z interfejsu (jeśli jest) w miejsce sekcji [schedule] z pliku.
+pub async fn load_saved_schedule(st: &AppState) {
+    match asi_db::schedule::load(&st.db).await {
+        Ok(Some(value)) => match serde_json::from_value::<ScheduleConfig>(value) {
+            Ok(saved) if validate_schedule(&saved).is_ok() => st.scans.set_schedule(saved),
+            _ => tracing::error!("zapisany harmonogram jest niepoprawny; używam konfiguracji z pliku"),
+        },
+        Ok(None) => {}
+        Err(e) => tracing::error!(error = %e, "harmonogram: błąd odczytu bazy"),
+    }
+}
+
+/// Pętla harmonogramu w `asi serve`. Ustawienia są czytane co minutę, więc zmiana z interfejsu
+/// działa bez restartu. Błędna konfiguracja skanu blokuje harmonogram (z logiem).
 pub async fn scheduler(st: AppState) {
-    let Ok(cfg) = st.scans.cfg.clone() else {
+    if st.scans.cfg.is_err() {
         tracing::error!("harmonogram wyłączony: błędna konfiguracja skanu");
         return;
-    };
-    if !cfg.schedule.enabled {
-        return;
     }
-    if let Err(e) = cfg.schedule.windows() {
-        tracing::error!(error = %format!("{e:#}"), "harmonogram wyłączony: błędne okno czasowe");
-        return;
-    }
+    load_saved_schedule(&st).await;
     let mut tick = tokio::time::interval(Duration::from_secs(60));
     loop {
         tick.tick().await;
+        let schedule = st.scans.schedule();
+        if !schedule.enabled {
+            continue;
+        }
         let last = match runs::last_scan(&st.db).await {
             Ok(l) => l,
             Err(e) => {
@@ -337,7 +360,7 @@ pub async fn scheduler(st: AppState) {
                 continue;
             }
         };
-        if !is_due(last, cfg.schedule.every_hours, Utc::now()) {
+        if !is_due(last, schedule.every_hours, Utc::now()) {
             continue;
         }
         match start_run(&st, None).await {
@@ -351,6 +374,43 @@ pub async fn scheduler(st: AppState) {
 }
 
 // --- trasy ------------------------------------------------------------------------
+
+/// Częstotliwość: od 1 godziny do 30 dni. Okna muszą się parsować (godziny HH:MM, dni mon..sun).
+fn validate_schedule(s: &ScheduleConfig) -> Result<(), String> {
+    if !(1..=720).contains(&s.every_hours) {
+        return Err("Częstotliwość musi wynosić od 1 do 720 godzin".into());
+    }
+    s.windows().map(|_| ()).map_err(|e| format!("{e:#}"))
+}
+
+pub async fn get_schedule(State(st): State<AppState>, user: AuthUser) -> ApiResult<Json<ScheduleConfig>> {
+    user.require(rbac::READ)?;
+    Ok(Json(st.scans.schedule()))
+}
+
+pub async fn put_schedule(
+    State(st): State<AppState>,
+    user: AuthUser,
+    ip: ClientIp,
+    Json(schedule): Json<ScheduleConfig>,
+) -> ApiResult<StatusCode> {
+    user.require(rbac::SCANS_CONFIGURE)?;
+    validate_schedule(&schedule).map_err(ApiError::BadRequest)?;
+    let value = serde_json::to_value(&schedule).map_err(anyhow::Error::from)?;
+    asi_db::schedule::save(&st.db, &value, user.0.id).await?;
+    st.scans.set_schedule(schedule);
+    let entry = Entry {
+        user_id: Some(user.0.id),
+        username: Some(&user.0.username),
+        action: "schedule.update",
+        entity: Some("scan_schedule"),
+        entity_id: None,
+        ip: ip.0.map(|i| i.to_string()),
+        details: value,
+    };
+    audit::record(&st.db, entry).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
 
 async fn record(
     st: &AppState,
