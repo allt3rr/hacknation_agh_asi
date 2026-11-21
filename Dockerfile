@@ -24,7 +24,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # Etap 3: obraz uruchomieniowy (Alpine: nmap + certyfikaty, healthcheck przez wget z busyboxa)
 FROM alpine:3.20
-RUN apk add --no-cache nmap ca-certificates \
+# -sV wymaga silnika NSE (nse_main.lua + skrypty kategorii "version"), które Alpine trzyma w osobnych pakietach
+RUN apk add --no-cache nmap nmap-nselibs nmap-scripts ca-certificates \
  && adduser -S -D -H -u 10001 -h /app -s /sbin/nologin asi \
  && mkdir -p /app/data \
  && chown -R asi /app

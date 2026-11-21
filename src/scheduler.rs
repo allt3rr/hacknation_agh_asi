@@ -63,19 +63,22 @@ impl Window {
     }
 }
 
+/// Ustawienia są czytane co minutę, więc zmiany z interfejsu działają bez restartu.
 pub async fn run(st: AppState) {
-    let schedule = st.cfg.schedule.clone();
-    if !schedule.enabled {
-        tracing::info!("harmonogram wyłączony (schedule.enabled = false)");
-        return;
-    }
-
-    let windows = parse_windows(&schedule.windows);
-    tracing::info!(windows = windows.len(), every_hours = schedule.every_hours, "harmonogram aktywny");
-
     let mut ticker = tokio::time::interval(CHECK_INTERVAL);
+    let mut was_enabled = None;
     loop {
         ticker.tick().await;
+        let schedule = st.settings.read().await.schedule.clone();
+        if was_enabled != Some(schedule.enabled) {
+            was_enabled = Some(schedule.enabled);
+            tracing::info!(enabled = schedule.enabled, every_hours = schedule.every_hours, "harmonogram");
+        }
+        if !schedule.enabled {
+            continue;
+        }
+
+        let windows = parse_windows(&schedule.windows);
         let now = Local::now().naive_local();
 
         // Bez zdefiniowanych okien skan może ruszyć o dowolnej porze.

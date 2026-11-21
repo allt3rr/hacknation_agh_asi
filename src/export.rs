@@ -1,19 +1,33 @@
 //! Eksport / import wyników w JSON i CSV (ten sam format w obie strony).
 
+use crate::db::Annotation;
 use crate::model::Observation;
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
+use std::collections::HashMap;
 
-pub const CSV_HEADER: [&str; 11] = [
+pub const CSV_HEADER: [&str; 14] = [
     "ip", "hostname", "port", "proto", "state", "service", "product", "version", "http_status", "http_title",
-    "technologies",
+    "technologies", "tags", "severity", "note",
 ];
 
-pub fn to_json(obs: &[Observation]) -> Result<String> {
-    Ok(serde_json::to_string_pretty(obs)?)
+pub type Annotations = HashMap<String, Annotation>;
+
+/// Każda obserwacja dostaje pole `annotation` (tagi, priorytet, notatka), jeśli analityk ją opisał.
+/// Import ignoruje to pole, więc format działa w obie strony.
+pub fn to_json(obs: &[Observation], annotations: &Annotations) -> Result<String> {
+    let mut rows = Vec::with_capacity(obs.len());
+    for o in obs {
+        let mut value = serde_json::to_value(o)?;
+        if let Some(annotation) = annotations.get(&o.key()) {
+            value["annotation"] = serde_json::to_value(annotation)?;
+        }
+        rows.push(value);
+    }
+    Ok(serde_json::to_string_pretty(&rows)?)
 }
 
-pub fn to_csv(obs: &[Observation]) -> Result<String> {
+pub fn to_csv(obs: &[Observation], annotations: &Annotations) -> Result<String> {
     let mut w = csv::Writer::from_writer(Vec::new());
     w.write_record(CSV_HEADER)?;
     for o in obs {
@@ -26,6 +40,7 @@ pub fn to_csv(obs: &[Observation]) -> Result<String> {
             })
             .collect::<Vec<_>>()
             .join("; ");
+        let annotation = annotations.get(&o.key());
         w.write_record([
             o.ip.clone(),
             o.hostname.clone().unwrap_or_default(),
@@ -38,6 +53,9 @@ pub fn to_csv(obs: &[Observation]) -> Result<String> {
             o.http.as_ref().map(|h| h.status.to_string()).unwrap_or_default(),
             o.http.as_ref().and_then(|h| h.title.clone()).unwrap_or_default(),
             techs,
+            annotation.map(|a| a.tags.join(", ")).unwrap_or_default(),
+            annotation.and_then(|a| a.severity.clone()).unwrap_or_default(),
+            annotation.and_then(|a| a.note.clone()).unwrap_or_default(),
         ])?;
     }
     let bytes = w.into_inner().map_err(|e| anyhow!("CSV: {e}"))?;
@@ -95,10 +113,32 @@ mod tests {
         let mut o = Observation::new("10.0.0.1".into(), 443, "tcp".into());
         o.service = Some("https".into());
         o.product = Some("nginx".into());
-        let csv = to_csv(&[o]).unwrap();
+        let csv = to_csv(&[o], &Annotations::new()).unwrap();
         let back = parse_results("csv", &csv).unwrap();
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].port, 443);
         assert_eq!(back[0].product.as_deref(), Some("nginx"));
+    }
+
+    #[test]
+    fn export_includes_annotations_and_reimports() {
+        let o = Observation::new("10.0.0.1".into(), 80, "tcp".into());
+        let annotation = Annotation {
+            key: o.key(),
+            tags: vec!["dmz".into()],
+            note: Some("sprawdzić".into()),
+            severity: Some("high".into()),
+            updated_by: "admin".into(),
+            updated_at: String::new(),
+        };
+        let annotations = Annotations::from([(o.key(), annotation)]);
+
+        let csv = to_csv(&[o.clone()], &annotations).unwrap();
+        assert!(csv.contains("dmz,high,sprawdzić"));
+        assert_eq!(parse_results("csv", &csv).unwrap().len(), 1);
+
+        let json = to_json(&[o], &annotations).unwrap();
+        assert!(json.contains("\"severity\": \"high\""));
+        assert_eq!(parse_results("json", &json).unwrap().len(), 1);
     }
 }

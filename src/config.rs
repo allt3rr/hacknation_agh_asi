@@ -2,7 +2,7 @@
 //! Sekrety (klucz danych, tokeny) są czytane ze zmiennych środowiskowych, nie z tego pliku.
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -70,7 +70,7 @@ pub struct ScanConfig {
     pub recheck_missing: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScheduleConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -80,7 +80,7 @@ pub struct ScheduleConfig {
     pub windows: Vec<WindowConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowConfig {
     /// Czas lokalny w formacie HH:MM.
     pub start: String,

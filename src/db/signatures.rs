@@ -37,6 +37,22 @@ pub async fn insert_signature(db: &Db, name: &str, yaml: &str, user: &str) -> Re
     Ok(id)
 }
 
+/// Zmienia treść (nazwa = id pierwszej sygnatury w YAML) i/lub włącza/wyłącza sygnaturę.
+pub async fn update_signature(db: &Db, id: &str, name_yaml: Option<(&str, &str)>, enabled: Option<bool>) -> Result<bool> {
+    let res = sqlx::query(
+        "UPDATE signatures
+         SET name = COALESCE(?, name), yaml = COALESCE(?, yaml), enabled = COALESCE(?, enabled)
+         WHERE id = ?",
+    )
+    .bind(name_yaml.map(|(name, _)| name))
+    .bind(name_yaml.map(|(_, yaml)| yaml))
+    .bind(enabled.map(i64::from))
+    .bind(id)
+    .execute(db)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
 pub async fn delete_signature(db: &Db, id: &str) -> Result<bool> {
     let res = sqlx::query("DELETE FROM signatures WHERE id = ?").bind(id).execute(db).await?;
     Ok(res.rows_affected() > 0)

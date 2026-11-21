@@ -6,6 +6,7 @@ mod dashboard;
 mod error;
 mod runs;
 mod session;
+mod settings;
 mod signatures;
 mod targets;
 mod users;
@@ -31,6 +32,7 @@ pub fn router(state: AppState) -> Router {
         .merge(runs::routes())
         .merge(annotations::routes())
         .merge(signatures::routes())
+        .merge(settings::routes())
         .merge(users::routes())
         .fallback(|| async { ApiError::NotFound });
 

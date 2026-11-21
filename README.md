@@ -23,6 +23,7 @@ src/
   diff.rs            porównanie skanów: nowe, znikające, zmienione usługi
   pipeline.rs        pełny przebieg skanu i import wyników
   scheduler.rs       okna czasowe i częstotliwość skanów
+  settings.rs        harmonogram i tempo zmieniane z interfejsu (nadpisują config/asi.toml)
   auth.rs            role, uprawnienia, hasła, sesje
   defectdojo.rs      eksport findingów do DefectDojo
   export.rs          eksport i import JSON/CSV
@@ -100,17 +101,18 @@ wymagają odkomentowania w `docker-compose.yml` opcji `user: root` i `cap_add: [
 |---|---|
 | Wczytanie IP, CIDR, domen (ręcznie, CSV, JSON) | `input.rs`, `api/targets.rs`, strona Cele |
 | Wielowątkowy skan nmap, podział na podgrupy, czas trwania | `scanner/mod.rs`, statystyki `chunks` i `duration_secs` przebiegu |
-| Ograniczanie tempa | `global_max_rate` dzielony na procesy (`--max-rate`), `http_concurrency` |
-| Okna czasowe, częstotliwość, wznowienie przerwanego skanu | `scheduler.rs`, `scan_runs.pending_json` |
+| Ograniczanie tempa | `global_max_rate` dzielony na procesy (`--max-rate`), `http_concurrency`; zmiana z UI: strona Ustawienia skanu (`PUT /api/settings`) |
+| Okna czasowe, częstotliwość, wznowienie przerwanego skanu | `scheduler.rs`, `scan_runs.pending_json`; zmiana z UI: strona Ustawienia skanu (`settings.rs`, tabela `settings`) |
 | Aktywne hosty i usługi | `scanner/nmap.rs` |
 | Tytuł, kod HTTP, nagłówki, ciasteczka, TLS, przekierowania | `scanner/http.rs` |
 | CMS, framework, serwer, IoT, staging, panel administracyjny | `signatures/default.yaml`, `fingerprint.rs` |
-| Własne sygnatury | `api/signatures.rs`, strona Sygnatury |
+| Własne sygnatury (dodawanie, edycja, wyłączanie) | `api/signatures.rs`, strona Sygnatury |
 | Porównanie skanów, nowe, znikające i zmienione usługi | `diff.rs`, `GET /api/runs/:id/changes`, `GET /api/diff?from=&to=` |
 | Hosty niestabilne | `db/hosts.rs` (active, unstable, inactive), ponowny pomiar w `pipeline.rs` |
 | Import wyników JSON/CSV przetwarzany jak skan | `pipeline::import_results` |
-| Eksport JSON/CSV | `GET /api/runs/:id/export?format=json` lub `csv` |
-| Edycja danych niezależnie od skanu | cele i adnotacje są w osobnych tabelach niż wyniki |
+| Eksport JSON/CSV (z adnotacjami) | `GET /api/runs/:id/export?format=json` lub `csv` |
+| Edycja danych niezależnie od skanu | cele, adnotacje usług i notatki skanów (`PUT /api/runs/:id`) są w osobnych tabelach/kolumnach niż wyniki |
+| Eksport wybranych obserwacji do DefectDojo | `POST /api/runs/:id/defectdojo` z `{"keys": ["ip:port/proto"]}`; priorytet z adnotacji = severity findingu |
 | RBAC i cztery role | `auth.rs` |
 | Szyfrowanie danych w spoczynku | `db/crypto.rs` (AES-256-GCM) |
 | DefectDojo | `defectdojo.rs`, przycisk na stronie Skany |
