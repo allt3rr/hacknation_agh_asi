@@ -9,8 +9,16 @@ const KIND_LABELS: Record<ChangeKind, string> = {
   host_returned: "host wrócił",
 };
 
+const KIND_COLORS: Record<ChangeKind, string> = {
+  new: "text-green",
+  gone: "text-red",
+  changed: "text-orange",
+  host_inactive: "text-red",
+  host_returned: "text-accent",
+};
+
 const COLUMNS: Column<Change>[] = [
-  { header: "Typ", render: (c) => <span className={`kind kind-${c.kind}`}>{KIND_LABELS[c.kind]}</span> },
+  { header: "Typ", render: (c) => <span className={KIND_COLORS[c.kind]}>{KIND_LABELS[c.kind]}</span> },
   { header: "Usługa / host", render: (c) => c.key },
   { header: "Pole", render: (c) => c.field ?? "" },
   { header: "Przed", render: (c) => c.before ?? "" },

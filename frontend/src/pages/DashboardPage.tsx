@@ -5,21 +5,21 @@ import { DataTable } from "../components/DataTable";
 import { StatCard } from "../components/StatCard";
 import { useApiData } from "../hooks";
 import type { Dashboard, NotableFinding } from "../types";
-import { formatDate } from "../utils";
+import { BTN_SECONDARY, formatDate } from "../utils";
 
 export function DashboardPage() {
   const { data, error, reload } = useApiData(api.dashboard);
 
   if (error) {
-    return <p className="notice error">{error}</p>;
+    return <p className="my-3.5 text-red">{error}</p>;
   }
   if (!data) {
-    return <p className="muted">Ładowanie...</p>;
+    return <p className="my-3.5 text-muted">Ładowanie...</p>;
   }
 
   return (
     <>
-      <Card actions={<button className="secondary" onClick={reload}>Odśwież</button>}>
+      <Card actions={<button className={BTN_SECONDARY} onClick={reload}>Odśwież</button>}>
         <Stats dashboard={data} />
       </Card>
 
@@ -48,7 +48,7 @@ export function DashboardPage() {
 function Stats({ dashboard }: { dashboard: Dashboard }) {
   const { counts, latest_run: run } = dashboard;
   return (
-    <div className="stats">
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
       <StatCard label="Cele" value={counts.targets} />
       <StatCard label="Hosty aktywne" value={counts.hosts.active ?? 0} />
       <StatCard label="Hosty niestabilne" value={counts.hosts.unstable ?? 0} />
@@ -71,7 +71,7 @@ function NotableFindings({ findings }: { findings: NotableFinding[] }) {
       columns={[
         { header: "Usługa", render: (f) => f.key },
         { header: "Znalezisko", render: (f) => f.name },
-        { header: "Kategoria", render: (f) => <span className="badge">{f.category}</span> },
+        { header: "Kategoria", render: (f) => <span className="mr-1 my-px inline-block rounded-full border border-line bg-bg px-2 py-px text-xs">{f.category}</span> },
         { header: "Pewność", render: (f) => `${f.confidence}%` },
         { header: "Tytuł strony", render: (f) => f.title ?? "" },
       ]}

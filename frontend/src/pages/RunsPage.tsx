@@ -8,8 +8,16 @@ import { NoticeBar } from "../components/NoticeBar";
 import { ObservationTable } from "../components/ObservationTable";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
-import type { Role, Run } from "../types";
-import { downloadBlob, fileFormat, formatDate, parseRunStats } from "../utils";
+import type { Role, Run, RunStatus } from "../types";
+import { BTN_SECONDARY, downloadBlob, fileFormat, formatDate, parseRunStats } from "../utils";
+
+const STATUS_COLORS: Record<RunStatus, string> = {
+  running: "text-accent",
+  completed: "text-green",
+  partial: "text-orange",
+  aborted: "",
+  failed: "text-red",
+};
 
 interface Details {
   title: string;
@@ -66,47 +74,47 @@ export function RunsPage({ role }: { role: Role }) {
 
       {can(role, "scan") && (
         <Card title="Nowy skan">
-          <div className="row">
+          <div className="my-2 flex flex-wrap items-center gap-2">
             <button onClick={startScan}>Uruchom skan</button>
-            <label className="muted">
+            <label className="text-muted">
               limit czasu (min){" "}
               <input
                 type="number"
                 min={1}
-                className="narrow"
+                className="w-20"
                 value={maxMinutes}
                 onChange={(e) => setMaxMinutes(e.target.value)}
               />
             </label>
           </div>
-          <div className="row">
-            <span className="muted">Import wyników skanu (JSON/CSV):</span>
+          <div className="my-2 flex flex-wrap items-center gap-2">
+            <span className="text-muted">Import wyników skanu (JSON/CSV):</span>
             <FilePicker accept=".csv,.json" buttonLabel="Importuj" onSubmit={importResults} />
           </div>
         </Card>
       )}
 
-      <Card title="Przebiegi" actions={<button className="secondary" onClick={reload}>Odśwież</button>}>
-        {error && <p className="notice error">{error}</p>}
+      <Card title="Przebiegi" actions={<button className={BTN_SECONDARY} onClick={reload}>Odśwież</button>}>
+        {error && <p className="my-3.5 text-red">{error}</p>}
         <DataTable
           rows={runs ?? []}
           rowKey={(r) => r.id}
           columns={[
             { header: "Start", render: (r) => formatDate(r.started_at) },
             { header: "Źródło", render: (r) => r.source },
-            { header: "Status", render: (r) => <span className={`status status-${r.status}`}>{r.status}</span> },
+            { header: "Status", render: (r) => <span className={STATUS_COLORS[r.status]}>{r.status}</span> },
             { header: "Czas [s]", render: (r) => r.duration_secs?.toFixed(1) ?? "" },
             { header: "Statystyki", render: (r) => <RunStatsSummary run={r} /> },
             {
               header: "",
               render: (r) => (
-                <div className="actions">
-                  <button className="secondary" onClick={() => showChanges(r)}>Zmiany</button>
-                  <button className="secondary" onClick={() => showServices(r)}>Usługi</button>
-                  <button className="secondary" onClick={() => exportRun(r, "json")}>JSON</button>
-                  <button className="secondary" onClick={() => exportRun(r, "csv")}>CSV</button>
+                <div className="flex flex-wrap gap-1">
+                  <button className={BTN_SECONDARY} onClick={() => showChanges(r)}>Zmiany</button>
+                  <button className={BTN_SECONDARY} onClick={() => showServices(r)}>Usługi</button>
+                  <button className={BTN_SECONDARY} onClick={() => exportRun(r, "json")}>JSON</button>
+                  <button className={BTN_SECONDARY} onClick={() => exportRun(r, "csv")}>CSV</button>
                   {can(role, "create") && (
-                    <button className="secondary" onClick={() => sendToDefectDojo(r)}>DefectDojo</button>
+                    <button className={BTN_SECONDARY} onClick={() => sendToDefectDojo(r)}>DefectDojo</button>
                   )}
                 </div>
               ),
@@ -116,7 +124,7 @@ export function RunsPage({ role }: { role: Role }) {
       </Card>
 
       {details && (
-        <Card title={details.title} actions={<button className="secondary" onClick={() => setDetails(null)}>Zamknij</button>}>
+        <Card title={details.title} actions={<button className={BTN_SECONDARY} onClick={() => setDetails(null)}>Zamknij</button>}>
           {details.content}
         </Card>
       )}
@@ -133,5 +141,5 @@ function RunStatsSummary({ run }: { run: Run }) {
     stats.pending ? `zaległe: ${stats.pending}` : null,
     stats.failed ? `błędy: ${stats.failed}` : null,
   ].filter(Boolean);
-  return <span className="muted">{parts.join(", ")}</span>;
+  return <span className="text-muted">{parts.join(", ")}</span>;
 }

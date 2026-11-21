@@ -6,7 +6,7 @@ import { NoticeBar } from "../components/NoticeBar";
 import { useApiData, useNotice } from "../hooks";
 import { ROLES } from "../permissions";
 import type { Role, User } from "../types";
-import { formatDate } from "../utils";
+import { BTN_SECONDARY, formatDate } from "../utils";
 
 export function UsersPage() {
   const { data: users, error, reload } = useApiData(api.users.list);
@@ -29,7 +29,7 @@ export function UsersPage() {
   return (
     <>
       <NoticeBar notice={notice} />
-      {error && <p className="notice error">{error}</p>}
+      {error && <p className="my-3.5 text-red">{error}</p>}
 
       <Card title="Nowy użytkownik">
         <NewUserForm
@@ -63,7 +63,7 @@ export function UsersPage() {
             {
               header: "",
               render: (u) => (
-                <button className="secondary" onClick={() => remove(u)}>
+                <button className={BTN_SECONDARY} onClick={() => remove(u)}>
                   Usuń
                 </button>
               ),
@@ -92,7 +92,7 @@ function NewUserForm({ onCreate }: NewUserFormProps) {
   }
 
   return (
-    <form className="row" onSubmit={handleSubmit}>
+    <form className="my-2 flex flex-wrap items-center gap-2" onSubmit={handleSubmit}>
       <input placeholder="login" value={username} onChange={(e) => setUsername(e.target.value)} />
       <input
         placeholder="hasło (min. 10 znaków)"

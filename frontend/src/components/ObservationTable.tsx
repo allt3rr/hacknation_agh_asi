@@ -4,7 +4,7 @@ import { DataTable, type Column } from "./DataTable";
 function DetectionBadge({ detection }: { detection: Detection }) {
   const version = detection.version ? ` ${detection.version}` : "";
   return (
-    <span className="badge" title={detection.evidence.join(", ")}>
+    <span className="mr-1 my-px inline-block rounded-full border border-line bg-bg px-2 py-px text-xs" title={detection.evidence.join(", ")}>
       {detection.name}
       {version} ({detection.confidence}%)
     </span>
@@ -17,7 +17,7 @@ const COLUMNS: Column<Observation>[] = [
     render: (o) => (
       <>
         {o.ip}:{o.port}/{o.proto}
-        {o.hostname && <div className="muted">{o.hostname}</div>}
+        {o.hostname && <div className="text-muted">{o.hostname}</div>}
       </>
     ),
   },

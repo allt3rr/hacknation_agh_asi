@@ -1,5 +1,8 @@
 import type { FileFormat, RunStats } from "./types";
 
+/** Klasy przycisku drugorzędnego (obramowany, bez tła). */
+export const BTN_SECONDARY = "border border-line bg-transparent px-2.5 py-1 text-fg";
+
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

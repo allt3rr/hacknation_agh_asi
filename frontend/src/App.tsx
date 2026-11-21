@@ -9,6 +9,7 @@ import { UsersPage } from "./pages/UsersPage";
 import { can, type Permission } from "./permissions";
 import { clearSession, loadSession, saveSession } from "./session";
 import type { Role, Session } from "./types";
+import { BTN_SECONDARY } from "./utils";
 
 type PageId = "dashboard" | "targets" | "runs" | "signatures" | "users";
 
@@ -67,24 +68,24 @@ export function App() {
 
   return (
     <>
-      <header className="topbar">
+      <header className="flex flex-wrap items-center gap-3 border-b border-line bg-surface px-4 py-2.5">
         <strong>ASI</strong>
         <nav>
           {visiblePages.map((p) => (
-            <button key={p.id} className={p.id === page ? "tab active" : "tab"} onClick={() => setPage(p.id)}>
+            <button key={p.id} className={`px-2.5 py-1.5 ${p.id === page ? "bg-bg text-fg" : "bg-transparent text-muted"}`} onClick={() => setPage(p.id)}>
               {p.label}
             </button>
           ))}
         </nav>
-        <span className="spacer" />
-        <span className="muted">
+        <span className="flex-1" />
+        <span className="text-muted">
           {session.username} ({session.role})
         </span>
-        <button className="secondary" onClick={logout}>
+        <button className={BTN_SECONDARY} onClick={logout}>
           Wyloguj
         </button>
       </header>
-      <main>
+      <main className="mx-auto max-w-[1300px] px-4 py-5">
         <CurrentPage page={page} role={session.role} />
       </main>
     </>

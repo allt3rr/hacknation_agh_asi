@@ -8,10 +8,10 @@ interface StatCardProps {
 
 export function StatCard({ label, value, hint }: StatCardProps) {
   return (
-    <div className="stat">
-      <div className="stat-value">{value}</div>
-      <div className="stat-label">{label}</div>
-      {hint && <div className="stat-hint">{hint}</div>}
+    <div>
+      <div className="text-2xl font-semibold">{value}</div>
+      <div className="text-muted">{label}</div>
+      {hint && <div className="text-xs text-muted">{hint}</div>}
     </div>
   );
 }

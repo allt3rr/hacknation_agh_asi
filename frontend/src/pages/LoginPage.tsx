@@ -22,8 +22,8 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   }
 
   return (
-    <form className="card login" onSubmit={handleSubmit}>
-      <h2>ASI: logowanie</h2>
+    <form className="mx-auto my-[12vh] flex max-w-[340px] flex-col gap-2 rounded-[10px] border border-line bg-surface p-4" onSubmit={handleSubmit}>
+      <h2 className="my-2 text-2xl font-bold">ASI: logowanie</h2>
       <input
         placeholder="Użytkownik"
         autoComplete="username"
@@ -38,7 +38,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         onChange={(e) => setPassword(e.target.value)}
       />
       <button type="submit">Zaloguj</button>
-      {error && <p className="notice error">{error}</p>}
+      {error && <p className="my-3.5 text-red">{error}</p>}
     </form>
   );
 }

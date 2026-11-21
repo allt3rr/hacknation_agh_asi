@@ -7,7 +7,7 @@ import { NoticeBar } from "../components/NoticeBar";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
 import type { ImportSummary, Role, Target, TargetPatch } from "../types";
-import { fileFormat } from "../utils";
+import { BTN_SECONDARY, fileFormat } from "../utils";
 
 const PLACEHOLDER = "10.0.0.0/24\n192.168.1.10\nintranet.example.pl";
 
@@ -40,19 +40,19 @@ export function TargetsPage({ role }: { role: Role }) {
 
       {can(role, "create") && (
         <Card title="Dodaj cele">
-          <textarea placeholder={PLACEHOLDER} value={text} onChange={(e) => setText(e.target.value)} />
-          <div className="row">
+          <textarea className="min-h-[110px] w-full" placeholder={PLACEHOLDER} value={text} onChange={(e) => setText(e.target.value)} />
+          <div className="my-2 flex flex-wrap items-center gap-2">
             <button onClick={addManually} disabled={!text.trim()}>
               Dodaj ręcznie
             </button>
-            <span className="muted">lub plik CSV (target,tags,note), JSON albo TXT:</span>
+            <span className="text-muted">lub plik CSV (target,tags,note), JSON albo TXT:</span>
             <FilePicker accept=".csv,.json,.txt" buttonLabel="Importuj plik" onSubmit={importFile} />
           </div>
         </Card>
       )}
 
       <Card title="Lista celów">
-        {error && <p className="notice error">{error}</p>}
+        {error && <p className="my-3.5 text-red">{error}</p>}
         <TargetTable targets={targets ?? []} role={role} onChanged={reload} run={run} />
       </Card>
     </>
@@ -122,7 +122,7 @@ function TargetTable({ targets, role, onChanged, run }: TargetTableProps) {
           header: "",
           render: (t) =>
             can(role, "delete") && (
-              <button className="secondary" onClick={() => remove(t)}>
+              <button className={BTN_SECONDARY} onClick={() => remove(t)}>
                 Usuń
               </button>
             ),

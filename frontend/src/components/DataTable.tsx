@@ -14,12 +14,12 @@ interface DataTableProps<T> {
 
 export function DataTable<T>({ columns, rows, rowKey, emptyText = "Brak danych" }: DataTableProps<T>) {
   if (rows.length === 0) {
-    return <p className="muted">{emptyText}</p>;
+    return <p className="my-3.5 text-muted">{emptyText}</p>;
   }
 
   return (
-    <div className="table-wrapper">
-      <table>
+    <div className="overflow-x-auto">
+      <table className="w-full">
         <thead>
           <tr>
             {columns.map((column) => (
