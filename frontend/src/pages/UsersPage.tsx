@@ -19,7 +19,7 @@ export function UsersPage() {
     });
 
   const resetPassword = (user: User) => {
-    const password = prompt(`Nowe hasło dla ${user.username} (min. 10 znaków). Aktywne sesje zostaną zakończone.`);
+    const password = prompt(`Nowe hasło dla ${user.username} (min. 10 znaków). Po zmianie użytkownik zostanie wylogowany ze wszystkich sesji.`);
     if (password) update(user, { password }, `Zmieniono hasło użytkownika ${user.username}`);
   };
 
@@ -121,16 +121,19 @@ function NewUserForm({ onCreate }: { onCreate: (username: string, password: stri
 
   return (
     <form className="my-2 flex flex-wrap items-center gap-2" onSubmit={handleSubmit}>
-      <input aria-label="Login" placeholder="login" value={username} onChange={(e) => setUsername(e.target.value)} />
+      <label htmlFor="new-user-login">Login</label>
+      <input id="new-user-login" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} />
+      <label htmlFor="new-user-password">Hasło (min. 10 znaków)</label>
       <input
-        aria-label="Hasło"
-        placeholder="hasło (min. 10 znaków)"
+        id="new-user-password"
         type="password"
         autoComplete="new-password"
+        minLength={10}
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
-      <select aria-label="Rola" value={role} onChange={(e) => setRole(e.target.value as Role)}>
+      <label htmlFor="new-user-role">Rola</label>
+      <select id="new-user-role" value={role} onChange={(e) => setRole(e.target.value as Role)}>
         {ROLES.map((r) => (
           <option key={r} value={r}>
             {ROLE_LABELS[r]}

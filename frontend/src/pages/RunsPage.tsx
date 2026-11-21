@@ -51,7 +51,7 @@ export function RunsPage({ session }: { session: Session }) {
   const startScan = () =>
     run(async () => {
       await api.runs.start();
-      info("Skan uruchomiony. Lista przebiegów odświeża się automatycznie.");
+      info("Skan uruchomiony. Lista odświeża się co 5 s, dopóki skan trwa.");
       await reload();
     });
 
@@ -65,7 +65,7 @@ export function RunsPage({ session }: { session: Session }) {
   const importResults = (file: File) =>
     run(async () => {
       const res = await api.runs.importResults(fileFormat(file.name), await file.text());
-      info(`Zaimportowano ${res.observations} usług, zmian: ${res.changes}`);
+      info(`Zaimportowano usługi: ${res.observations}, wykryte zmiany: ${res.changes}`);
       await reload();
     });
 
@@ -80,7 +80,7 @@ export function RunsPage({ session }: { session: Session }) {
   const sendToDefectDojo = (r: Run) =>
     run(async () => {
       const res = await api.runs.sendToDefectDojo(r.id);
-      info(`Wysłano do DefectDojo: ${res.findings} findingów`);
+      info(`Wysłano do DefectDojo findingi: ${res.findings}`);
     });
 
   return (
@@ -92,12 +92,12 @@ export function RunsPage({ session }: { session: Session }) {
               <button onClick={startScan} disabled={scanActive}>
                 {scanActive ? "Skan w toku..." : "Uruchom skan"}
               </button>
-              <span className="text-muted">Okna czasowe i częstotliwość: zakładka Harmonogram. Porty i limit tempa: plik konfiguracji skanu.</span>
+              <span className="text-muted">Jeśli w zakładce Harmonogram są okna czasowe, skan można uruchomić tylko w oknie.</span>
             </div>
           )}
           {can(session, "targets.create") && (
             <div className="my-2 flex flex-wrap items-center gap-2">
-              <span className="text-muted">Import wyników (JSON/CSV w formacie eksportu):</span>
+              <span className="text-muted">Import wyników skanu z pliku JSON lub CSV w formacie eksportu ASI:</span>
               <FilePicker accept=".csv,.json" label="Plik z wynikami skanu" buttonLabel="Importuj" onSubmit={importResults} />
             </div>
           )}

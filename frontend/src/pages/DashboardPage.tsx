@@ -73,7 +73,7 @@ export function DashboardPage() {
       </Card>
 
       <Card title="Najważniejsze znaleziska">
-        <p className="mb-2 text-muted">Panele administracyjne, środowiska testowe, urządzenia IoT i inne interesujące usługi z ostatniego przebiegu.</p>
+        <p className="mb-2 text-muted">Usługi z ostatniego skanu rozpoznane jako panel administracyjny, środowisko testowe (staging) lub inne oznaczone jako interesujące.</p>
         <DataTable
           label="Najważniejsze znaleziska"
           filterBy={(f) => [f.ip, f.name, f.category, f.title].join(" ")}
@@ -103,7 +103,7 @@ export function DashboardPage() {
             <RunHistory runs={finished.slice(0, HISTORY_RUNS)} />
           </Card>
           <Card title="Różnice zależne od pory dnia">
-            <p className="mb-2 text-muted">Średnie ze skanów według godziny startu. Duże różnice wskazują hosty widoczne tylko w części doby.</p>
+            <p className="mb-2 text-muted">Średnia liczba aktywnych hostów i usług w skanach rozpoczętych o danej porze (czas przeglądarki). Różnica między porami oznacza hosty dostępne tylko w części doby.</p>
             <TimeOfDay runs={finished} />
           </Card>
         </>

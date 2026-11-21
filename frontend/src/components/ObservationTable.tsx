@@ -152,9 +152,7 @@ export function ObservationTable({ rows, editable, onChanged, onError }: Props) 
           <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} />
           Grupuj podobne usługi
         </label>
-        <span className="text-muted" title={INTEREST_HINT}>
-          Sortowanie wg oceny priorytetu (najciekawsze na górze).
-        </span>
+        <span className="text-muted">Kolejność: od najwyższej oceny. {INTEREST_HINT}</span>
       </div>
 
       {grouped ? (
@@ -323,7 +321,7 @@ function CorrectionForm({ row: o, onSave }: { row: ResultRow; onSave: (row: Resu
   ];
   return (
     <>
-      <h4 className="mt-3 font-semibold">Korekta wyniku (zachowywana przy kolejnych skanach)</h4>
+      <h4 className="mt-3 font-semibold">Korekta wyniku</h4>
       <div className="my-2 grid gap-2 sm:grid-cols-[max-content_1fr] sm:items-center">
         <label htmlFor="correction-severity">Priorytet</label>
         <select id="correction-severity" className="justify-self-start" value={o.severity ?? ""} onChange={(e) => onSave(o, "severity", e.target.value)}>
@@ -340,7 +338,10 @@ function CorrectionForm({ row: o, onSave }: { row: ResultRow; onSave: (row: Resu
           </div>
         ))}
       </div>
-      <p className="text-muted">Puste pole przywraca wartość z pomiaru. Zapis po wyjściu z pola lub klawiszem Enter.</p>
+      <p className="text-muted">
+        Korekta dotyczy tej usługi (adres:port) również w kolejnych skanach i trafia do eksportu. Priorytet jest wysyłany do DefectDojo jako
+        severity. Puste pole przywraca wartość z pomiaru. Zapis: Enter albo wyjście z pola.
+      </p>
     </>
   );
 }

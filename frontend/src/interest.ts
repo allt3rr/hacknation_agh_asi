@@ -28,4 +28,4 @@ export function interestLabel(score: number): string {
 }
 
 export const INTEREST_HINT =
-  "Ocena 0-100: panel administracyjny 40, staging 35, IoT/interesujące 30, CMS 15, inne 5-10 (× pewność detekcji) plus priorytet (severity) z korekty.";
+  "Ocena 0–100 = suma wag wykrytych kategorii × pewność (panel administracyjny 40, staging 35, IoT i interesujące 30, CMS 15, pozostałe 5–10) + priorytet z korekty (Low 10 … Critical 40).";

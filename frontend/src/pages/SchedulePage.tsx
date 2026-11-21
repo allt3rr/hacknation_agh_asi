@@ -54,20 +54,20 @@ export function SchedulePage({ session }: { session: Session }) {
     event.preventDefault();
     run(async () => {
       await api.schedule.save(draft);
-      info("Zapisano harmonogram. Obowiązuje od następnego sprawdzenia (co minutę).");
+      info("Zapisano harmonogram. Backend sprawdza go co 60 s.");
       await reload();
     });
   };
 
   return (
     <form onSubmit={save}>
-      {!editable && <p className="mb-4 text-muted">Twoja rola pozwala tylko na podgląd harmonogramu.</p>}
+      {!editable && <p className="mb-4 text-muted">Tylko odczyt: Twoja rola nie może zmieniać harmonogramu.</p>}
 
       <fieldset disabled={!editable} className="contents">
         <Card title="Automatyczne skany">
           <div className="my-2 flex flex-wrap items-center gap-2">
             <input id="schedule-enabled" type="checkbox" checked={draft.enabled} onChange={(e) => update({ enabled: e.target.checked })} />
-            <label htmlFor="schedule-enabled">Uruchamiaj skany automatycznie</label>
+            <label htmlFor="schedule-enabled">Włącz automatyczne skany</label>
           </div>
           <div className="my-2 flex flex-wrap items-center gap-2">
             <label htmlFor="every-hours">Częstotliwość: co</label>
@@ -84,17 +84,18 @@ export function SchedulePage({ session }: { session: Session }) {
             />
             <span>godz.</span>
             <span id="every-hours-hint" className="text-muted">
-              (1–720). Przebieg przerwany lub zakończony błędem jest wznawiany przy najbliższej okazji.
+              Odstęp od startu poprzedniego skanu, od 1 do 720 godz. Po skanie częściowym lub zakończonym błędem kolejny startuje bez czekania na ten odstęp.
             </span>
           </div>
         </Card>
 
         <Card title="Okna czasowe uruchomienia">
           <p className="mb-3 text-muted">
-            Skan startuje tylko w oknie. Jeśli nie zakończy się przed końcem okna, zostaje zatrzymany, a niezeskanowane adresy są skanowane jako
-            pierwsze w kolejnym oknie. Bez okien skan może ruszyć o dowolnej porze. Godziny według czasu serwera.
+            Skany, także uruchamiane ręcznie, startują tylko w oknie. Skan, który nie skończy się do końca okna, zostaje zatrzymany, a niezeskanowane
+            adresy idą na początek kolejnego okna. Okno może przechodzić przez północ, np. 22:00–06:00. Bez okien skan może ruszyć o każdej porze.
+            Godziny są w UTC (czas polski: zimą UTC+1, latem UTC+2).
           </p>
-          {draft.windows.length === 0 && <p className="mb-3 text-muted">Brak okien.</p>}
+          {draft.windows.length === 0 && <p className="mb-3 text-muted">Brak okien: skan może ruszyć o każdej porze.</p>}
           {draft.windows.map((window, index) => (
             <fieldset key={index} className="my-2 flex flex-wrap items-center gap-2 rounded-xl border border-line p-3">
               <legend className="px-1 text-muted">Okno {index + 1}</legend>
@@ -102,7 +103,7 @@ export function SchedulePage({ session }: { session: Session }) {
               <input id={`win-start-${index}`} type="time" required value={window.start} onChange={(e) => setWindow(index, { start: e.target.value })} />
               <label htmlFor={`win-end-${index}`}>do</label>
               <input id={`win-end-${index}`} type="time" required value={window.end} onChange={(e) => setWindow(index, { end: e.target.value })} />
-              <span className="text-muted">dni (bez zaznaczenia: codziennie):</span>
+              <span className="text-muted">dni tygodnia (bez zaznaczenia: każdy dzień):</span>
               {DAYS.map(([day, short]) => (
                 <label key={day} className="inline-flex items-center gap-1">
                   <input type="checkbox" checked={window.days.includes(day)} onChange={() => toggleDay(index, day)} />
@@ -134,7 +135,7 @@ export function SchedulePage({ session }: { session: Session }) {
         )}
       </fieldset>
       <p className="mt-4 text-muted">
-        Limit tempa (pakiety/s), porty i liczba równoległych procesów nmap są w pliku konfiguracji skanu <code>backend/config/scan.toml</code>.
+        Limit pakietów/s, listę portów i liczbę równoległych procesów nmap ustawia się w pliku <code>backend/config/scan.toml</code>.
       </p>
     </form>
   );

@@ -91,7 +91,8 @@ export function SignaturesPage({ session }: { session: Session }) {
               </button>
             )}
             <span id="signature-hint" className="text-muted">
-              Tylko bezpieczna detekcja (nagłówek, ciasteczko, tytuł, fragment HTML, ścieżka bez logowania). Ścieżki reguł `path` muszą zaczynać się od „/” (bez innego hosta).
+              Reguły mogą sprawdzać nagłówek, ciasteczko, tytuł strony, fragment HTML lub odpowiedź ścieżki (tylko GET, bez logowania). Ścieżka w regule
+              `path` musi zaczynać się od „/” i nie może wskazywać innego hosta.
             </span>
           </div>
         </Card>
