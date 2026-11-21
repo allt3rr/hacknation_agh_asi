@@ -1,7 +1,7 @@
 // Ocena "ciekawości" usługi dla analityka (0-100). Heurystyka po stronie interfejsu:
-// waga kategorii detekcji × pewność, plus priorytet nadany ręcznie w adnotacji.
+// waga kategorii detekcji × pewność, plus priorytet nadany w korekcie wyniku (severity).
 
-import type { Annotation, Observation } from "./types";
+import type { ResultRow } from "./types";
 
 const CATEGORY_WEIGHTS: Record<string, number> = {
   admin_panel: 40,
@@ -16,13 +16,9 @@ const CATEGORY_WEIGHTS: Record<string, number> = {
 
 const SEVERITY_BONUS: Record<string, number> = { critical: 40, high: 30, medium: 20, low: 10 };
 
-export function interestScore(observation: Observation, annotation?: Annotation): number {
-  const detections = observation.detections.reduce(
-    (sum, d) => sum + ((CATEGORY_WEIGHTS[d.category] ?? 5) * d.confidence) / 100,
-    0,
-  );
-  const severity = SEVERITY_BONUS[annotation?.severity ?? ""] ?? 0;
-  return Math.min(100, Math.round(detections + severity));
+export function interestScore(row: ResultRow): number {
+  const detections = row.technologies.reduce((sum, d) => sum + ((CATEGORY_WEIGHTS[d.category] ?? 5) * d.confidence) / 100, 0);
+  return Math.min(100, Math.round(detections + (SEVERITY_BONUS[row.severity ?? ""] ?? 0)));
 }
 
 export function interestLabel(score: number): string {
@@ -32,4 +28,4 @@ export function interestLabel(score: number): string {
 }
 
 export const INTEREST_HINT =
-  "Ocena 0-100: panel administracyjny 40, staging 35, IoT/interesujące 30, CMS 15, inne 5-10 (× pewność detekcji) plus priorytet z adnotacji.";
+  "Ocena 0-100: panel administracyjny 40, staging 35, IoT/interesujące 30, CMS 15, inne 5-10 (× pewność detekcji) plus priorytet (severity) z korekty.";

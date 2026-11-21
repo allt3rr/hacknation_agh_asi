@@ -5,6 +5,8 @@ signatures_dir = "signatures"
 [server]
 bind = "127.0.0.1:8080"
 session_hours = 12
+# Atrybut Secure cookie sesji (asi_session). Ustaw true, gdy aplikacja działa za HTTPS.
+cookie_secure = false
 # zbudowany frontend React (cd frontend && npm run build)
 static_dir = "frontend/dist"
 

@@ -1,17 +1,17 @@
-//! Role, uprawnienia, hasła (Argon2) i sesje (tokeny Bearer trzymane w pamięci).
+//! Role, uprawnienia, hasła (Argon2) i sesje w cookie `asi_session` (sesja w bazie, w cookie losowy token).
 
 use crate::api::ApiError;
 use crate::db;
+use crate::scanner::http::sha256_hex;
 use crate::state::AppState;
 use anyhow::{anyhow, Result};
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
 use axum::extract::FromRequestParts;
-use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
+use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use chrono::{DateTime, Utc};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -73,12 +73,29 @@ impl Role {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Session {
-    pub user_id: String,
-    pub username: String,
-    pub role: Role,
-    pub expires: DateTime<Utc>,
+pub const SESSION_COOKIE: &str = "asi_session";
+
+/// SHA-256 tokenu sesji: tylko ta wartość trafia do bazy.
+pub fn token_hash(token: &str) -> String {
+    sha256_hex(token.as_bytes())
+}
+
+/// Cookie sesji: niedostępne dla JavaScriptu, wysyłane tylko z naszego originu.
+pub fn session_cookie(token: String, hours: i64, secure: bool) -> Cookie<'static> {
+    Cookie::build((SESSION_COOKIE, token))
+        .http_only(true)
+        .same_site(SameSite::Strict)
+        .path("/")
+        .secure(secure)
+        .max_age(time::Duration::hours(hours))
+        .build()
+}
+
+/// Cookie czyszczące sesję w przeglądarce (`Max-Age=0`). Wysyłane zawsze, także gdy klient nie miał cookie.
+pub fn cleared_session_cookie(secure: bool) -> Cookie<'static> {
+    let mut cookie = session_cookie(String::new(), 0, secure);
+    cookie.set_max_age(time::Duration::ZERO);
+    cookie
 }
 
 pub fn hash_password(password: &str) -> Result<String> {
@@ -123,10 +140,10 @@ pub async fn bootstrap_admin(st: &AppState) -> Result<()> {
     Ok(())
 }
 
-/// Zalogowany użytkownik. Użyty jako argument handlera wymusza ważny token.
+/// Zalogowany użytkownik. Użyty jako argument handlera wymusza ważną sesję z cookie.
+/// Rola pochodzi z bazy przy każdym żądaniu, więc jej zmiana działa od razu.
 #[derive(Debug, Clone)]
 pub struct AuthUser {
-    pub token: String,
     pub user_id: String,
     pub username: String,
     pub role: Role,
@@ -147,28 +164,20 @@ impl FromRequestParts<AppState> for AuthUser {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, st: &AppState) -> Result<Self, Self::Rejection> {
-        let token = bearer_token(parts).ok_or(ApiError::Unauthorized)?;
+        let jar = CookieJar::from_headers(&parts.headers);
+        let token = jar.get(SESSION_COOKIE).ok_or(ApiError::Unauthorized)?.value();
 
-        let mut sessions = st.sessions.write().await;
-        let session = sessions.get(&token).cloned().ok_or(ApiError::Unauthorized)?;
-
-        if session.expires <= Utc::now() {
-            sessions.remove(&token);
-            return Err(ApiError::Unauthorized);
-        }
+        let user = db::find_session_user(&st.db, &token_hash(token))
+            .await?
+            .ok_or(ApiError::Unauthorized)?;
+        let role = Role::parse(&user.role).ok_or_else(|| anyhow!("nieznana rola w bazie: {}", user.role))?;
 
         Ok(AuthUser {
-            token,
-            user_id: session.user_id,
-            username: session.username,
-            role: session.role,
+            user_id: user.id,
+            username: user.username,
+            role,
         })
     }
-}
-
-fn bearer_token(parts: &Parts) -> Option<String> {
-    let header = parts.headers.get(AUTHORIZATION)?.to_str().ok()?;
-    header.strip_prefix("Bearer ").map(str::to_string)
 }
 
 #[cfg(test)]

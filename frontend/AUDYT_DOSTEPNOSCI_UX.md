@@ -1,7 +1,7 @@
 # Audyt dostępności i UI/UX ASI
 
 Data: 2026-11-21 · Zakres: `frontend/src` (React + Tailwind) · Odniesienie: WCAG 2.2 AA oraz „AGH – Pełna treść zadania konkursowego.pdf”.
-Etap 1: zmiany tylko we frontendzie. Etap 2: braki z sekcji 4 uzupełnione we frontendzie i backendzie (za zgodą).
+Stan po scaleniu z `main` (nowy backend `backend/` na PostgreSQL, API `/api/v1`). Poprawki dostępności i UX są przeniesione na frontend API v1. Funkcje, których API v1 nie udostępnia, są wypisane w sekcji 4 jako braki.
 
 ## 1. Podsumowanie
 
@@ -12,7 +12,7 @@ Etap 1: zmiany tylko we frontendzie. Etap 2: braki z sekcji 4 uzupełnione we fr
 | Kontrast | zielony 3,3:1 i pomarańczowy 3,2:1 (jasny motyw), czerwony 3,5:1 (ciemny), obramowania pól 1,2:1 | wszystkie teksty statusów ≥ 4,5:1, obramowania pól ≥ 3:1 w obu motywach |
 | Komunikaty | nieogłaszane przez czytniki ekranu | `role="status"` / `role="alert"` |
 | Nawigacja klawiaturą | brak skip linku, brak `aria-current`, fokus zostaje na przycisku | skip link, `aria-current="page"`, po zmianie widoku fokus trafia na `h1`, wyraźny `:focus-visible` |
-| Zgodność ze specyfikacją | brak porównania dwóch skanów, edycji znalezisk, nagłówków/ciasteczek/TLS/przekierowań w UI | dodane (sekcja 3) |
+| Zgodność ze specyfikacją | nagłówki, przekierowania i dowody detekcji niewidoczne w UI | panel „Szczegóły” usługi; braki API v1 w sekcji 4 |
 
 ## 2. Dostępność (WCAG 2.2 AA): znalezione problemy i poprawki
 
@@ -33,7 +33,7 @@ Etap 1: zmiany tylko we frontendzie. Etap 2: braki z sekcji 4 uzupełnione we fr
 | A13 | Pusty nagłówek kolumny akcji, `th` bez `scope` | 1.3.1 | `scope="col"`, ukryty tekst „Akcje”, `aria-label` tabeli | `components/DataTable.tsx` |
 | A14 | Pole wyboru pliku bez etykiety, brak stanu wysyłania | 4.1.2, 4.1.3 | `aria-label`, `aria-busy`, „Wysyłanie...” | `components/FilePicker.tsx` |
 | A15 | Pola tekstowe sygnatur i celów bez etykiet | 1.3.1 | `<label>` + `aria-describedby` z podpowiedzią | `pages/SignaturesPage.tsx`, `pages/TargetsPage.tsx` |
-| A16 | Formularz nowego użytkownika i lista ról bez etykiet, wymóg hasła tylko w placeholderze | 1.3.1, 3.3.2 | etykiety, podpowiedź `min. 10 znaków` powiązana z polem, blokada przycisku | `pages/UsersPage.tsx` |
+| A16 | Role w formularzu i tabeli użytkowników jako kody (`viewer`) | 3.3.2 | nazwy ról z treści zadania; pola mają `aria-label` (wersja z `main`) | `pages/UsersPage.tsx` |
 | A17 | Dowody detekcji tylko w atrybucie `title` (niedostępne z klawiatury i dotyku) | 1.3.1, 2.1.1 | dowody widoczne w szczegółach usługi | `components/ObservationTable.tsx` |
 | A18 | Szczegóły skanu otwierały się poniżej, bez informacji dla użytkownika | 2.4.3 | przewinięcie i fokus na nagłówek otwartego panelu | `pages/RunsPage.tsx`, `components/ObservationTable.tsx` |
 | A19 | Wykres zmian w czasie musiałby być dostępny bez wzroku | 1.1.1 | tabela z liczbami, pasek tylko ilustracyjny (`aria-hidden`) | `pages/DashboardPage.tsx` |
@@ -42,75 +42,58 @@ Etap 1: zmiany tylko we frontendzie. Etap 2: braki z sekcji 4 uzupełnione we fr
 
 | # | Problem | Poprawka |
 |---|---|---|
-| U1 | Role i statusy wyświetlane po angielsku (`viewer`, `partial`) | nazwy ról zgodne z pkt 13 zadania („Odczyt”, „Modyfikacja i odczyt”, „Dodawanie, usuwanie, modyfikacja”, „Administracja”), polskie statusy, np. „częściowy (przerwany oknem/limitem)” |
+| U1 | Role i statusy wyświetlane po angielsku (`viewer`, `partial`) | nazwy ról zgodne z pkt 13 zadania („Odczyt”, „Modyfikacja i odczyt”, „Dodawanie, usuwanie, modyfikacja”, „Administracja”), polskie statusy przebiegów („w kolejce”, „zakończony”, „częściowy”, „anulowany”) |
 | U2 | Czas skanu w sekundach (`28800.0`) | format „8 h 0 min 0 s” na liście skanów i na dashboardzie |
-| U3 | Licznik „Zmiany” na dashboardzie ucięty do 200 (limit API) | liczba z statystyk ostatniego przebiegu |
 | U4 | Brak odświeżania w trakcie skanu („Odśwież listę, aby zobaczyć postęp”) | automatyczne odświeżanie co 5 s, gdy trwa skan (dashboard i skany), przycisk „Uruchom skan” zablokowany w trakcie skanu |
 | U5 | >10 000 celów renderowanych naraz (zawieszenie przeglądarki) | tabele pokazują po 200 wierszy z przyciskiem „Pokaż kolejne”, filtr tekstowy dla dłuższych tabel |
 | U6 | Edycja tagów/notatki celu zapisywała się tylko po opuszczeniu pola | dodany zapis klawiszem Enter, podpowiedź w `title` |
-| U7 | Brak podpowiedzi o oknach czasowych | opis przy limicie czasu: okna i częstotliwość są w `config/asi.toml` |
 | U8 | Moduł sygnatur bez informacji o bezpiecznym użyciu | podpowiedź pod polem YAML (zgodnie z sekcją o bezpiecznych sygnaturach) |
 | U9 | Słabo czytelny dashboard (wymóg pkt 15 i kryterium 10) | sekcja „Podsumowanie”, opis znalezisk, polskie nazwy kategorii (panel administracyjny, staging, IoT), nowa sekcja „Zmiany w czasie” |
 | U10 | Na telefonie liczniki dashboardu w jednej kolumnie | węższe kafle (2 kolumny przy 375 px), brak poziomego przewijania strony |
 
-## 4. Zgodność z treścią zadania
+## 4. Zgodność z treścią zadania (frontend na API v1)
 
-✅ było w UI · 🆕 dodane w tym audycie (etap 1: tylko frontend, etap 2: frontend + backend) · ⚠️ częściowo · ❌ brak
+✅ jest · 🆕 dodane w tym audycie · ⚠️ częściowo · ❌ brak w API v1, wymaga backendu
 
 | Wymaganie (PDF) | Status | Uwagi |
 |---|---|---|
-| 1. Wczytanie IP, CIDR, domen | ✅ | ręcznie + plik CSV/JSON/TXT |
-| 2. Skan discovery, czas trwania | ✅ 🆕 | czas w czytelnym formacie, limit czasu skanu |
-| 2. Podział na podgrupy | ⚠️ | robi to backend; UI pozwala ustawić liczbę równoległych podgrup, nie pokazuje ich rozmiarów |
-| 3–4. Aktywne hosty, usługi | ✅ | dashboard, lista usług skanu |
-| 5. Tytuł, kod HTTP, nagłówki, ciasteczka, certyfikat TLS, przekierowania | ✅ 🆕 | panel „Szczegóły” usługi |
-| 6–7. CMS, framework, IoT, staging, panel admina | ✅ 🆕 | znaleziska z polskimi kategoriami, dowody detekcji |
-| 8. Porównanie kolejnych przebiegów, porównanie dwóch skanów | ✅ 🆕 | „Zmiany” przy skanie + wybór dowolnych dwóch skanów (`GET /api/diff`) |
+| 1. Wczytanie IP, CIDR, domen | ✅ | ręcznie + plik CSV/JSON/TXT, podgląd importu |
+| 2. Skan discovery, czas trwania | ✅ 🆕 | czas w czytelnym formacie, anulowanie skanu |
+| 2. Podział na podgrupy | ⚠️ | robi backend; UI pokazuje pokrycie (zaplanowane/zeskanowane/zaległe) |
+| 3–4. Aktywne hosty, usługi | ✅ | |
+| 5. Tytuł, kod HTTP, nagłówki, ciasteczka, przekierowania | ✅ 🆕 | panel „Szczegóły” usługi (nagłówki, przekierowania, zablokowane przekierowania, ciasteczka z atrybutami) |
+| 5. Certyfikat TLS | ❌ | `HttpView` w API v1 nie zawiera certyfikatu |
+| 6–7. CMS, framework, IoT, staging, panel admina | ✅ 🆕 | polskie kategorie, dowody detekcji w szczegółach |
+| 8. Porównanie kolejnych przebiegów | ✅ | „Zmiany” przy przebiegu |
+| Porównanie dwóch dowolnych skanów | ❌ | brak endpointu porównania w API v1 |
 | 9. Nowe, znikające, zmienione usługi | ✅ | |
-| 10. Własne sygnatury | ✅ 🆕 | dodawanie, **edycja**, **włączanie/wyłączanie**, usuwanie (`PUT /api/signatures/:id`) |
-| 11. Formularz: ręcznie + CSV/JSON | ✅ | cele i import wyników |
+| 10. Własne sygnatury | ✅ | dodawanie, edycja (nowa wersja), wyłączanie |
+| 11. Formularz: ręcznie + CSV/JSON | ✅ | |
 | 12–13. RBAC i 4 role | ✅ 🆕 | role nazwane jak w zadaniu |
-| 14. Edycja niezależnie od skanu, zachowana przy kolejnych skanach | ✅ 🆕 | cele, adnotacje usług (tagi, priorytet, notatka), **notatka skanu** (`PUT /api/runs/:id`, szyfrowana) |
-| 15. Czytelny interfejs, dashboard z najważniejszymi znaleziskami | ✅ 🆕 | sekcje 2 i 3 |
-| 16. Szyfrowanie w spoczynku | ✅ | backend; nowa notatka skanu też jest szyfrowana (`note_enc`) |
-| Konfiguracja skanu: okno czasowe i częstotliwość | 🆕 | strona „Ustawienia skanu” (`GET/PUT /api/settings`): włączenie harmonogramu, co ile godzin, okna z dniami tygodnia. Harmonogram czyta ustawienia co minutę, bez restartu |
-| Ograniczanie tempa zapytań | 🆕 | limit pakietów/s, liczba procesów nmap, liczba zapytań HTTP; obowiązuje od następnego skanu |
-| Eksport JSON/CSV | ✅ 🆕 | eksport zawiera adnotacje (JSON: pole `annotation`; CSV: kolumny `tags`, `severity`, `note`); import nadal przyjmuje ten format |
-| Edycja danych skanów, wyników i konfiguracji | ✅ 🆕 | notatka skanu, adnotacje wyników, ustawienia skanu |
-| Mile widziane: harmonogram cykliczny | ✅ 🆕 | konfigurowalny z UI |
-| Mile widziane: wykrywanie różnic zależnych od pory dnia | 🆕 ⚠️ | „Różnice zależne od pory dnia” na dashboardzie: średnie hostów/usług/zmian wg pory startu skanu. Agregat per skan, nie per host |
-| Mile widziane: ocena „ciekawości”/priorytetu | 🆕 | kolumna „Ocena” 0–100 (kategoria detekcji × pewność + priorytet z adnotacji), sortowanie od najciekawszych. Heurystyka po stronie UI |
-| Mile widziane: grupowanie podobnych usług | 🆕 | przełącznik „Grupuj podobne usługi” (serwis + produkt + wersja) |
-| Mile widziane: tagi | ✅ 🆕 | cele + usługi, filtr po tagach |
-| Mile widziane: eksport wybranych obserwacji do DefectDojo | 🆕 | zaznaczanie usług i „Wyślij zaznaczone do DefectDojo” (`POST /runs/:id/defectdojo` z `{keys}`); priorytet z adnotacji ustawia severity findingu, tagi i notatka trafiają do opisu |
-| Mile widziane: wizualizacja zmian w czasie | 🆕 | „Zmiany w czasie” na dashboardzie |
-| Mile widziane: powtarzanie pomiarów niestabilnych hostów | ✅ | backend (`recheck_missing`) |
-| Mile widziane: pasywne źródła danych | ❌ | poza zakresem (organizator ich nie udostępnił) |
+| 14. Edycja niezależnie od skanu | ✅ | cele (tagi, notatka, wykluczenie), korekty wyników (status, notatka) przez `/overrides` |
+| 15. Czytelny interfejs, dashboard | ✅ 🆕 | sekcje 2 i 3 |
+| Konfiguracja skanu z UI: okno czasowe, częstotliwość | ❌ | tylko konfiguracja backendu; brak endpointu ustawień |
+| Ograniczanie tempa z UI | ❌ | jw. |
+| Edycja danych skanu (np. notatka przebiegu) | ❌ | brak endpointu |
+| Eksport JSON/CSV | ✅ | |
+| Mile widziane: różnice zależne od pory dnia | 🆕 ⚠️ | średnie hostów/usług wg pory startu skanu (z `coverage`); agregat per skan |
+| Mile widziane: ocena „ciekawości” | 🆕 | kolumna „Ocena” 0–100 (kategoria × pewność + `severity`), sortowanie w obrębie strony wyników |
+| Mile widziane: grupowanie podobnych usług | 🆕 | przełącznik w tabeli usług (w obrębie strony wyników) |
+| Mile widziane: tagi | ✅ | cele |
+| Mile widziane: eksport wybranych obserwacji do DefectDojo | ❌ | API v1 wysyła cały przebieg |
+| Mile widziane: wizualizacja zmian w czasie | 🆕 | „Zmiany w czasie” na dashboardzie (hosty, usługi, czas) |
 
-### Zmiany w backendzie (etap 2, za zgodą)
-
-- `migrations/0002_settings_run_notes.sql`: tabela `settings`, kolumna `scan_runs.note_enc`.
-- `src/settings.rs`, `src/db/settings.rs`, `src/api/settings.rs`: ustawienia w czasie działania z walidacją (okna, zakresy liczb). Odczyt: każda rola; zapis: uprawnienie skanowania (editor, admin).
-- `src/scheduler.rs`: harmonogram czyta ustawienia co minutę zamiast raz przy starcie; `src/pipeline.rs`: skaner używa tempa z ustawień.
-- `src/api/runs.rs`, `src/db/runs.rs`: `PUT /api/runs/:id` (notatka, uprawnienie modyfikacji), wysyłka wybranych usług do DefectDojo, adnotacje w eksporcie.
-- `src/api/signatures.rs`, `src/db/signatures.rs`: `PUT /api/signatures/:id` (YAML i/lub `enabled`, walidacja jak przy dodawaniu).
-- `src/export.rs`, `src/defectdojo.rs`: adnotacje w eksporcie i findingach.
-- Testy: walidacja ustawień, eksport z adnotacjami i ponowny import, severity z adnotacji w raporcie DefectDojo.
+Wersja tych braków dla starego backendu (`src/`, SQLite) jest w historii: commity „feat(backend): scan settings API…” i „feat(frontend): accessibility audit fixes…” na gałęzi `frontend`. Po scaleniu `main` buduje wyłącznie `backend/`, więc trzeba je zaimplementować w nowym backendzie.
 
 ## 5. Weryfikacja
 
-- `npm run build` (tsc + vite): bez błędów.
-- `cargo test` (w kontenerze `rust:1-alpine`, na hoście brak linkera MSVC): 17/17, w tym nowe testy walidacji ustawień, eksportu z adnotacjami i severity w DefectDojo.
-- Przeglądarka (Vite dev, odpowiedzi API podstawione w przeglądarce, bez prawdziwych danych logowania): logowanie i komunikat błędu, dashboard (zmiany w czasie, pora dnia), porównanie skanów, szczegóły usługi z TLS, zapis adnotacji, notatka skanu, ocena i grupowanie usług, wysyłka zaznaczonych usług do DefectDojo (treść `{keys}`), ustawienia skanu (treść zgodna z `RuntimeSettings`), edycja i wyłączanie sygnatur, 450 celów ze stronicowaniem, przenoszenie fokusu, 375 px bez poziomego przewijania, oba motywy.
-- Skrypt na wszystkich stronach: 0 kontrolek bez nazwy, 0 `th` bez `scope`, 0 zduplikowanych `id`.
+- `npm run build` (tsc + vite) po scaleniu: bez błędów.
+- Przeglądarka (Vite, odpowiedzi API v1 podstawione w przeglądarce): sekcja w raporcie scalenia.
 
-- Przebudowany kontener `asi-asi-1`: start z migracją 0002 na istniejącej bazie bez błędów.
-- Test end-to-end przez HTTP na jednorazowej instancji z pustą bazą: 28/28 (ustawienia z walidacją, notatka skanu, adnotacje w eksporcie CSV/JSON i ponowny import, edycja/wyłączanie sygnatur, wybór usług do DefectDojo, uprawnienia ról viewer/analyst/admin). Interfejs na tej instancji: ustawienia, notatki, ocena usług.
-
-Nie sprawdzono: faktycznej wysyłki do DefectDojo (instancja testowa nie miała tokenu), testu z czytnikiem ekranu (NVDA/JAWS), pełnego skanu axe.
+Nie sprawdzono: frontendu z nowym backendem na prawdziwej bazie, testu z czytnikiem ekranu, pełnego skanu axe.
 
 ## 6. Pozostałe uwagi (bez zmian)
 
 - Formularz nowego użytkownika czyści pola także wtedy, gdy backend odrzuci utworzenie konta (np. zajęty login).
+- Reset hasła używa `prompt()`, który pokazuje hasło jawnym tekstem (wersja z `main`).
 - Usunięcie elementu korzysta z `confirm()`, co jest dostępne, ale nie da się go ostylować.
-- Kontener `asi-asi-1` serwuje starą wersję frontendu; po zmianach trzeba go przebudować (`docker compose up --build`).

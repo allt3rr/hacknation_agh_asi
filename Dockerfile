@@ -1,54 +1,49 @@
 # syntax=docker/dockerfile:1
+# Obraz ASI: backend (backend/, PostgreSQL) ze skanerem nmap i zbudowanym interfejsem z tego samego originu.
 
-# Etap 1: frontend (React + Vite). Cache npm przez BuildKit.
+# Etap 1: interfejs (React + Vite) z lockfile.
 FROM node:20-alpine AS frontend
 WORKDIR /frontend
-COPY frontend/package*.json ./
-RUN --mount=type=cache,target=/root/.npm \
-    if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+COPY frontend/package.json frontend/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
-# Etap 2: backend (Rust, statyczna binarka musl). Cache rejestru crate'ów i katalogu target przez BuildKit.
-FROM rust:1-alpine AS backend
+# Etap 2: backend (Rust, statyczna binarka musl) z wersjonowanego Cargo.lock.
+FROM rust:1-alpine3.22 AS backend
 RUN apk add --no-cache musl-dev
 WORKDIR /src
-COPY Cargo.toml Cargo.lock* ./
-COPY src ./src
-COPY migrations ./migrations
+COPY backend/ ./
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/src/target \
-    cargo build --release \
+    cargo build --release --locked -p asi \
  && cp /src/target/release/asi /usr/local/bin/asi
 
-# Etap 3: obraz uruchomieniowy (Alpine: nmap + certyfikaty, healthcheck przez wget z busyboxa)
-FROM alpine:3.20
-# -sV wymaga silnika NSE (nse_main.lua + skrypty kategorii "version"), które Alpine trzyma w osobnych pakietach
+# Etap 3: obraz uruchomieniowy na wspieranym Alpine, bez roota.
+FROM alpine:3.22
+# nmap-nselibs + nmap-scripts: -sV inicjuje silnik NSE (nse_main.lua i katalog scripts);
+# skryptów nie uruchamiamy (brak --script), więc to nie zwiększa intensywności skanu
 RUN apk add --no-cache nmap nmap-nselibs nmap-scripts ca-certificates \
- && adduser -S -D -H -u 10001 -h /app -s /sbin/nologin asi \
- && mkdir -p /app/data \
- && chown -R asi /app
-
+ && adduser -S -D -H -u 10001 -h /app -s /sbin/nologin asi
 WORKDIR /app
 COPY --from=backend /usr/local/bin/asi /usr/local/bin/asi
-COPY --from=frontend /frontend/dist ./frontend/dist
-COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-COPY config ./config
+COPY --from=frontend /frontend/dist ./ui
 COPY signatures ./signatures
-COPY examples ./examples
-RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh
+COPY backend/config/scan.toml ./config/scan.toml
 
 ENV ASI_BIND=0.0.0.0:8080 \
+    ASI_STATIC_DIR=/app/ui \
+    ASI_SIGNATURES_DIR=/app/signatures \
+    ASI_SCAN_CONFIG=/app/config/scan.toml \
     RUST_LOG=info,sqlx=warn
 
-# Bez uprawnień roota nmap używa skanu connect(), co wystarcza do discovery.
-# SYN scan i ICMP wymagają roota oraz cap_add NET_RAW/NET_ADMIN (patrz README).
+# Bez roota nmap używa skanu connect(), co wystarcza do discovery.
+# SYN scan i ICMP wymagają roota oraz cap_add NET_RAW/NET_ADMIN (README).
 USER asi
-VOLUME ["/app/data"]
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -q -O /dev/null http://127.0.0.1:8080/api/health || exit 1
 
-ENTRYPOINT ["docker-entrypoint.sh"]
+ENTRYPOINT ["asi"]
 CMD ["serve"]

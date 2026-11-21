@@ -1,30 +1,27 @@
-// Klient REST API. Token sesji jest ustawiany po zalogowaniu (setAuthToken).
+// Klient REST API v1. Sesję trzyma ciasteczko HttpOnly `asi_session`, które przeglądarka
+// wysyła sama (ten sam origin), więc JavaScript nie widzi ani nie przechowuje tokenu.
 
 import type {
-  Annotation,
   Change,
   Dashboard,
   FileFormat,
   ImportSummary,
-  Observation,
+  Page,
+  ResultRow,
   Role,
   Run,
   Session,
-  Settings,
   SignatureList,
   Target,
   TargetPatch,
   User,
 } from "./types";
 
-const API_PREFIX = "/api";
+const API_PREFIX = "/api/v1";
 
-let authToken: string | null = null;
+// 401 wylogowuje tylko zalogowanego użytkownika; 401 z błędnego hasła lub pierwszego /me nie.
+let loggedIn = false;
 let onUnauthorized: () => void = () => {};
-
-export function setAuthToken(token: string | null) {
-  authToken = token;
-}
 
 export function setUnauthorizedHandler(handler: () => void) {
   onUnauthorized = handler;
@@ -39,7 +36,7 @@ export class ApiError extends Error {
   }
 }
 
-type Method = "GET" | "POST" | "PUT" | "DELETE";
+type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 interface RequestOptions {
   json?: unknown;
@@ -48,10 +45,6 @@ interface RequestOptions {
 
 async function send(method: Method, path: string, options: RequestOptions = {}): Promise<Response> {
   const headers: Record<string, string> = {};
-  if (authToken) {
-    headers.Authorization = `Bearer ${authToken}`;
-  }
-
   let body: string | undefined;
   if (options.json !== undefined) {
     headers["Content-Type"] = "application/json";
@@ -63,7 +56,8 @@ async function send(method: Method, path: string, options: RequestOptions = {}):
 
   const response = await fetch(API_PREFIX + path, { method, headers, body });
 
-  if (response.status === 401 && authToken) {
+  if (response.status === 401 && loggedIn) {
+    loggedIn = false;
     onUnauthorized();
   }
   if (!response.ok) {
@@ -83,72 +77,82 @@ async function readErrorMessage(response: Response): Promise<string> {
 
 async function request<T>(method: Method, path: string, options?: RequestOptions): Promise<T> {
   const response = await send(method, path, options);
-  if (response.status === 204) {
+  if (response.status === 204 || response.status === 200 && response.headers.get("content-length") === "0") {
     return undefined as T;
   }
   return (await response.json()) as T;
 }
 
+async function startSession(pending: Promise<Session>): Promise<Session> {
+  const session = await pending;
+  loggedIn = true;
+  return session;
+}
+
 export const api = {
   login: (username: string, password: string) =>
-    request<Session>("POST", "/login", { json: { username, password } }),
+    startSession(request<Session>("POST", "/auth/login", { json: { username, password } })),
 
-  logout: () => request<void>("POST", "/logout"),
+  /** Bieżąca sesja z ciasteczka; 401, gdy nikt nie jest zalogowany. */
+  me: () => startSession(request<Session>("GET", "/me")),
+
+  /** Rzuca wyjątek przy błędzie — wylogowanie potwierdza dopiero odpowiedź serwera. */
+  logout: async () => {
+    await request<void>("POST", "/auth/logout");
+    loggedIn = false;
+  },
+
+  authConfig: () => request<{ session_ttl_hours: number }>("GET", "/auth/config"),
 
   dashboard: () => request<Dashboard>("GET", "/dashboard"),
 
   targets: {
     list: () => request<Target[]>("GET", "/targets"),
     addText: (text: string) => request<ImportSummary>("POST", "/targets", { json: { text } }),
-    importFile: (format: FileFormat, content: string) =>
-      request<ImportSummary>("POST", `/targets/import?format=${format}`, { text: content }),
-    update: (id: string, patch: TargetPatch) => request<void>("PUT", `/targets/${id}`, { json: patch }),
+    importFile: (format: FileFormat, content: string, dryRun: boolean) =>
+      request<ImportSummary>("POST", `/targets/import?format=${format}&dry_run=${dryRun}`, { text: content }),
+    update: (id: string, patch: TargetPatch) => request<void>("PATCH", `/targets/${id}`, { json: patch }),
     remove: (id: string) => request<void>("DELETE", `/targets/${id}`),
   },
 
   runs: {
     list: () => request<Run[]>("GET", "/runs"),
-    start: (maxMinutes?: number) =>
-      request<{ status: string }>("POST", maxMinutes ? `/runs?max_minutes=${maxMinutes}` : "/runs"),
-    updateNote: (id: string, note: string) => request<void>("PUT", `/runs/${id}`, { json: { note } }),
-    changes: (id: string) => request<Change[]>("GET", `/runs/${id}/changes`),
-    observations: (id: string) => request<Observation[]>("GET", `/runs/${id}/observations`),
+    start: () => request<{ run_id: string }>("POST", "/runs"),
+    cancel: (id: string) => request<void>("POST", `/runs/${id}/cancel`),
+    changes: (id: string, offset = 0) => request<Page<Change>>("GET", `/runs/${id}/changes?limit=200&offset=${offset}`),
+    observations: (id: string, offset = 0) =>
+      request<Page<ResultRow>>("GET", `/runs/${id}/observations?limit=100&offset=${offset}`),
     exportFile: async (id: string, format: "csv" | "json") => {
       const response = await send("GET", `/runs/${id}/export?format=${format}`);
       return response.blob();
     },
-    /** Bez `keys` wysyłany jest cały skan. */
-    sendToDefectDojo: (id: string, keys?: string[]) =>
-      request<unknown>("POST", `/runs/${id}/defectdojo`, keys ? { json: { keys } } : {}),
-    compare: (from: string, to: string) =>
-      request<Change[]>("GET", `/diff?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+    sendToDefectDojo: (id: string) => request<{ findings: number }>("POST", `/runs/${id}/defectdojo`),
     importResults: (format: FileFormat, content: string) =>
-      request<{ run_id: string }>("POST", `/results/import?format=${format}`, { text: content }),
+      request<{ run_id: string; observations: number; changes: number }>("POST", `/results/import?format=${format}`, {
+        text: content,
+      }),
   },
 
-  annotations: {
-    list: () => request<Annotation[]>("GET", "/annotations"),
-    save: (annotation: Annotation) => request<void>("PUT", "/annotations", { json: annotation }),
+  overrides: {
+    set: (key: string, field: string, value: string, reason?: string) =>
+      request<{ id: string }>("PUT", "/overrides", { json: { key, field, value, reason } }),
+    remove: (key: string, field: string) =>
+      request<void>("DELETE", `/overrides?key=${encodeURIComponent(key)}&field=${encodeURIComponent(field)}`),
   },
 
   signatures: {
     list: () => request<SignatureList>("GET", "/signatures"),
-    add: (yaml: string) => request<{ id: string; active_signatures: number }>("POST", "/signatures", { json: { yaml } }),
-    update: (id: string, change: { yaml?: string; enabled?: boolean }) =>
-      request<{ id: string; active_signatures: number }>("PUT", `/signatures/${id}`, { json: change }),
-    remove: (id: string) => request<void>("DELETE", `/signatures/${id}`),
-  },
-
-  settings: {
-    get: () => request<Settings>("GET", "/settings"),
-    save: (settings: Settings) => request<void>("PUT", "/settings", { json: settings }),
+    add: (yaml: string) => request<{ created: string[] }>("POST", "/signatures", { json: { yaml } }),
+    update: (slug: string, yaml: string) => request<{ updated: string }>("PUT", `/signatures/${slug}`, { json: { yaml } }),
+    disable: (slug: string) => request<void>("DELETE", `/signatures/${slug}`),
   },
 
   users: {
-    list: () => request<User[]>("GET", "/users"),
+    list: () => request<User[]>("GET", "/admin/users"),
     create: (username: string, password: string, role: Role) =>
-      request<{ id: string }>("POST", "/users", { json: { username, password, role } }),
-    changeRole: (id: string, role: Role) => request<void>("PUT", `/users/${id}`, { json: { role } }),
-    remove: (id: string) => request<void>("DELETE", `/users/${id}`),
+      request<{ id: string }>("POST", "/admin/users", { json: { username, password, role } }),
+    update: (id: string, patch: { role?: Role; password?: string; disabled?: boolean }) =>
+      request<void>("PATCH", `/admin/users/${id}`, { json: patch }),
+    remove: (id: string) => request<void>("DELETE", `/admin/users/${id}`),
   },
 };

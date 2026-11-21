@@ -1,0 +1,15 @@
+[package]
+name = "asi-fingerprint"
+description = "ASI: silnik sygnatur YAML (pasywna detekcja technologii)"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+asi-core.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+tracing.workspace = true

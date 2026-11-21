@@ -6,7 +6,6 @@ use super::{join_tags, now, Db};
 use crate::input::split_list;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Annotation {
@@ -53,15 +52,6 @@ pub async fn upsert_annotation(db: &Db, crypto: &FieldCrypto, annotation: &Annot
     .execute(db)
     .await?;
     Ok(())
-}
-
-/// Adnotacje według klucza usługi `ip:port/proto` (do eksportu i DefectDojo).
-pub async fn annotation_map(db: &Db, crypto: &FieldCrypto) -> Result<HashMap<String, Annotation>> {
-    Ok(list_annotations(db, crypto)
-        .await?
-        .into_iter()
-        .map(|annotation| (annotation.key.clone(), annotation))
-        .collect())
 }
 
 pub async fn list_annotations(db: &Db, crypto: &FieldCrypto) -> Result<Vec<Annotation>> {

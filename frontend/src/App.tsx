@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, setAuthToken, setUnauthorizedHandler } from "./api";
+import { api, setUnauthorizedHandler } from "./api";
+import { CookieNotice } from "./components/CookieNotice";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RunsPage } from "./pages/RunsPage";
-import { SettingsPage } from "./pages/SettingsPage";
 import { SignaturesPage } from "./pages/SignaturesPage";
 import { TargetsPage } from "./pages/TargetsPage";
 import { UsersPage } from "./pages/UsersPage";
 import { can, ROLE_LABELS, type Permission } from "./permissions";
-import { clearSession, loadSession, saveSession } from "./session";
-import type { Role, Session } from "./types";
-import { BTN_SECONDARY } from "./utils";
+import type { Session } from "./types";
+import { BTN_SECONDARY, errorMessage } from "./utils";
 
-type PageId = "dashboard" | "targets" | "runs" | "signatures" | "settings" | "users";
+type PageId = "dashboard" | "targets" | "runs" | "signatures" | "users";
 
 interface PageDefinition {
   id: PageId;
@@ -25,20 +24,23 @@ const PAGES: PageDefinition[] = [
   { id: "targets", label: "Cele" },
   { id: "runs", label: "Skany" },
   { id: "signatures", label: "Sygnatury" },
-  { id: "settings", label: "Ustawienia skanu" },
-  { id: "users", label: "Użytkownicy", requires: "users" },
+  { id: "users", label: "Użytkownicy", requires: "admin.users" },
 ];
 
-function restoreSession(): Session | null {
-  const session = loadSession();
-  // Token ustawiamy od razu, zanim strony zaczną pobierać dane.
-  setAuthToken(session?.token ?? null);
-  return session;
+export function App() {
+  return (
+    <>
+      <Shell />
+      <CookieNotice />
+    </>
+  );
 }
 
-export function App() {
-  const [session, setSession] = useState<Session | null>(restoreSession);
+function Shell() {
+  // undefined: jeszcze sprawdzamy ciasteczko sesji przez /api/v1/me
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [page, setPage] = useState<PageId>("dashboard");
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const label = PAGES.find((p) => p.id === page)?.label ?? "";
 
@@ -51,33 +53,41 @@ export function App() {
     headingRef.current?.focus();
   }, [page, session]);
 
+  useEffect(() => {
+    api.me().then(setSession, () => setSession(null));
+  }, []);
+
   const startSession = (newSession: Session) => {
-    setAuthToken(newSession.token);
-    saveSession(newSession);
     setSession(newSession);
+    setLogoutError(null);
     setPage("dashboard");
   };
 
-  const endSession = useCallback(() => {
-    setAuthToken(null);
-    clearSession();
-    setSession(null);
-  }, []);
+  const endSession = useCallback(() => setSession(null), []);
 
+  // ekran logowania dopiero po potwierdzeniu przez serwer; przy błędzie można ponowić
   const logout = async () => {
-    await api.logout().catch(() => undefined);
-    endSession();
+    try {
+      await api.logout();
+      setLogoutError(null);
+      endSession();
+    } catch (e) {
+      setLogoutError(`Nie udało się wylogować: ${errorMessage(e)}`);
+    }
   };
 
   useEffect(() => {
     setUnauthorizedHandler(endSession);
   }, [endSession]);
 
+  if (session === undefined) {
+    return null;
+  }
   if (!session) {
     return <LoginPage onLogin={startSession} />;
   }
 
-  const visiblePages = PAGES.filter((p) => !p.requires || can(session.role, p.requires));
+  const visiblePages = PAGES.filter((p) => !p.requires || can(session, p.requires));
 
   return (
     <>
@@ -100,34 +110,40 @@ export function App() {
         </nav>
         <span className="flex-1" />
         <span className="text-muted">
-          {session.username} <span title={`rola: ${session.role}`}>({ROLE_LABELS[session.role]})</span>
+          {session.username} ({session.roles.map((r) => ROLE_LABELS[r] ?? r).join(", ")})
         </span>
         <button className={BTN_SECONDARY} onClick={logout}>
           Wyloguj
         </button>
       </header>
-      <main id="main" className="mx-auto max-w-[1300px] px-4 py-5">
+      {logoutError && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 border-b border-line bg-surface px-4 py-2 text-red">
+          {logoutError}
+          <button className={BTN_SECONDARY} onClick={logout}>
+            Ponów
+          </button>
+        </div>
+      )}
+      <main id="main" className="mx-auto max-w-[1300px] px-4 py-5 pb-24">
         <h1 ref={headingRef} tabIndex={-1} className="mb-4 text-2xl font-bold outline-none">
           {label}
         </h1>
-        <CurrentPage page={page} role={session.role} />
+        <CurrentPage page={page} session={session} />
       </main>
     </>
   );
 }
 
-function CurrentPage({ page, role }: { page: PageId; role: Role }) {
+function CurrentPage({ page, session }: { page: PageId; session: Session }) {
   switch (page) {
     case "dashboard":
       return <DashboardPage />;
     case "targets":
-      return <TargetsPage role={role} />;
+      return <TargetsPage session={session} />;
     case "runs":
-      return <RunsPage role={role} />;
+      return <RunsPage session={session} />;
     case "signatures":
-      return <SignaturesPage role={role} />;
-    case "settings":
-      return <SettingsPage role={role} />;
+      return <SignaturesPage session={session} />;
     case "users":
       return <UsersPage />;
   }

@@ -42,8 +42,6 @@ pub struct ScanReport {
     pub pending: Vec<String>,
     /// Cele z podgrup, w których nmap zakończył się błędem.
     pub failed: Vec<String>,
-    /// Komunikat ostatniego błędu nmap (do pokazania, gdy skan nie powiódł się wcale).
-    pub last_error: Option<String>,
     pub chunks: Vec<ChunkStat>,
 }
 
@@ -53,7 +51,6 @@ impl ScanReport {
         self.scanned.extend(other.scanned);
         self.observations.extend(other.observations);
         self.failed.extend(other.failed);
-        self.last_error = other.last_error.or(self.last_error.take());
         self.chunks.extend(other.chunks);
     }
 }
@@ -222,7 +219,6 @@ fn record_chunk_result(shared: &SharedScan, chunk: &[String], result: Result<nma
             tracing::error!(error = %error, size = chunk.len(), "podgrupa zakończona błędem");
             report.chunks.push(ChunkStat { size: chunk.len(), secs, live: 0, ok: false });
             report.failed.extend(chunk.iter().cloned());
-            report.last_error = Some(error.to_string());
         }
     }
 }

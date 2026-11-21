@@ -14,7 +14,7 @@ use crate::input;
 use crate::model::Observation;
 use crate::scanner::{ScanReport, Scanner};
 use crate::state::AppState;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use tokio::time::Instant;
@@ -44,8 +44,7 @@ pub async fn execute_scan(st: &AppState, deadline: Option<Instant>, source: &str
             tracing::info!(%run_id, status, duration_secs = duration, "skan zakończony");
             if let Some(dd) = &st.cfg.defectdojo {
                 // błąd wysyłki nie psuje skanu; można ponowić przyciskiem na stronie Skany
-                let annotations = db::annotation_map(&st.db, &st.crypto).await.unwrap_or_default();
-                match defectdojo::push(dd, &run_id, &observations, &changes, &annotations).await {
+                match defectdojo::push(dd, &run_id, &observations, &changes).await {
                     Ok(_) => tracing::info!(%run_id, "wysłano do DefectDojo"),
                     Err(error) => tracing::warn!(%run_id, %error, "wysyłka do DefectDojo nieudana"),
                 }
@@ -128,15 +127,9 @@ async fn scan_and_ingest(
 ) -> Result<ScanOutcome> {
     let total = targets.len();
     let signatures = st.signatures.read().await.clone();
-    let scan_config = st.settings.read().await.apply(&st.cfg.scan);
-    let scanner = Scanner::new(&scan_config, signatures)?;
+    let scanner = Scanner::new(&st.cfg.scan, signatures)?;
 
     let mut report = scanner.run(targets, deadline).await?;
-    // Żadna podgrupa się nie udała: przebieg kończy się błędem i nie trafia do porównania ani DefectDojo.
-    if report.scanned.is_empty() && !report.failed.is_empty() {
-        let reason = report.last_error.as_deref().unwrap_or("nieznany błąd");
-        bail!("Skan nieudany dla wszystkich {} celów: {reason}", report.failed.len());
-    }
     if st.cfg.scan.recheck_missing {
         recheck_missing_hosts(st, &scanner, &mut report, deadline).await?;
     }

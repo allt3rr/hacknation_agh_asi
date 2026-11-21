@@ -10,6 +10,8 @@ export function Toaster(props: ToasterProps) {
     <Sonner
       theme="system"
       position="bottom-right"
+      offset={{ bottom: 96 }}
+      mobileOffset={{ bottom: 96 }}
       closeButton
       containerAriaLabel="Powiadomienia"
       className="toaster group"

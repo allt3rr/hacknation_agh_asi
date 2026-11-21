@@ -1,4 +1,3 @@
-use super::crypto::FieldCrypto;
 use super::{new_id, now, Db};
 use anyhow::Result;
 use serde::Serialize;
@@ -16,11 +15,6 @@ pub struct RunRow {
     pub stats_json: Option<String>,
     #[serde(skip_serializing)]
     pub pending_json: Option<String>,
-    #[serde(skip_serializing)]
-    pub note_enc: Option<String>,
-    /// Odszyfrowana notatka analityka (wypełniana w `list_runs`).
-    #[sqlx(skip)]
-    pub note: Option<String>,
 }
 
 pub async fn create_run(db: &Db, source: &str) -> Result<String> {
@@ -58,25 +52,12 @@ pub async fn finish_run(
     Ok(())
 }
 
-pub async fn list_runs(db: &Db, crypto: &FieldCrypto, limit: i64) -> Result<Vec<RunRow>> {
-    let mut runs = sqlx::query_as::<_, RunRow>("SELECT * FROM scan_runs ORDER BY started_at DESC LIMIT ?")
+pub async fn list_runs(db: &Db, limit: i64) -> Result<Vec<RunRow>> {
+    let runs = sqlx::query_as::<_, RunRow>("SELECT * FROM scan_runs ORDER BY started_at DESC LIMIT ?")
         .bind(limit)
         .fetch_all(db)
         .await?;
-    for run in &mut runs {
-        run.note = crypto.decrypt_opt(run.note_enc.as_deref())?;
-    }
     Ok(runs)
-}
-
-/// Notatkę można zmieniać niezależnie od stanu skanu.
-pub async fn update_run_note(db: &Db, crypto: &FieldCrypto, id: &str, note: Option<&str>) -> Result<bool> {
-    let res = sqlx::query("UPDATE scan_runs SET note_enc = ? WHERE id = ?")
-        .bind(crypto.encrypt_opt(note)?)
-        .bind(id)
-        .execute(db)
-        .await?;
-    Ok(res.rows_affected() > 0)
 }
 
 pub async fn latest_finished_run(db: &Db) -> Result<Option<RunRow>> {

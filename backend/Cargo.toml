@@ -1,0 +1,59 @@
+[workspace]
+resolver = "2"
+members = ["crates/asi-core", "crates/asi-crypto", "crates/asi-fingerprint", "crates/asi-scanner", "crates/asi-db", "crates/asi-api", "bin/asi"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+publish = false
+license = "MIT"
+
+[workspace.dependencies]
+asi-core = { path = "crates/asi-core" }
+asi-crypto = { path = "crates/asi-crypto" }
+asi-db = { path = "crates/asi-db" }
+asi-fingerprint = { path = "crates/asi-fingerprint" }
+asi-scanner = { path = "crates/asi-scanner" }
+asi-api = { path = "crates/asi-api" }
+
+aes-gcm = "0.10"
+anyhow = "1"
+csv = "1.3"
+ipnet = "2.9"
+regex = "1"
+quick-xml = { version = "0.41", features = ["serialize", "overlapped-lists"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "multipart"] }
+tokio-util = "0.7"
+toml = "0.8"
+url = "2"
+x509-parser = "0.16"
+argon2 = "0.5"
+axum = "0.8"
+axum-extra = { version = "0.10", features = ["cookie"] }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "migrate", "macros"] }
+time = "0.3"
+tokio = { version = "1", features = ["full"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Argon2 w buildzie debug jest bardzo wolny; testy logowania liczą go wielokrotnie.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+strip = true

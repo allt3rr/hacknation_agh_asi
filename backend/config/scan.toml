@@ -1,0 +1,42 @@
+# Konfiguracja skanu ASI (ASI_SCAN_CONFIG). Wszystkie pola są opcjonalne; pominięte mają
+# ostrożne wartości domyślne. Nieznane pola i błędne okna czasowe blokują start skanu.
+
+nmap_binary = "nmap"
+
+# Lista dozwolonych portów (np. od organizatora). Gdy ustawiona, nmap skanuje tylko te porty,
+# a sondy HTTP mogą łączyć się wyłącznie z nimi. Bez niej: top_ports.
+# ports = "21,22,25,53,80,110,143,443,445,3306,3389,5432,8000-8100,8443,9000,9090,9443"
+top_ports = 100
+
+# Łączny limit pakietów/s dzielony równo między procesy nmap.
+global_max_rate = 500
+concurrency = 4
+
+# Adaptacyjne podgrupy: startowy / minimalny / maksymalny rozmiar i docelowy czas podgrupy (s).
+chunk_size = 64
+min_chunk = 8
+max_chunk = 512
+target_chunk_secs = 300
+host_timeout = "5m"
+
+# Sondy HTTP/HTTPS: tylko GET, bez logowania, odpowiedź czytana do 256 KiB.
+http_timeout_secs = 8
+http_concurrency = 16
+probe_paths = true
+
+max_targets = 70000
+inactive_after_misses = 3
+recheck_missing = true
+max_chunk_attempts = 3
+
+[schedule]
+enabled = false
+every_hours = 24
+
+# Okna czasowe (czas lokalny). Skan w oknie dostaje termin = koniec okna; po nim cały ruch
+# (nmap, HTTP, ponowienia) jest przerywany, a zaległa praca wznawiana w następnym oknie.
+# Gdy okna są zdefiniowane, ręczny start poza oknem jest odrzucany.
+# [[schedule.windows]]
+# start = "22:00"
+# end = "06:00"
+# days = []   # puste = codziennie; np. ["mon", "tue", "wed", "thu", "fri"]

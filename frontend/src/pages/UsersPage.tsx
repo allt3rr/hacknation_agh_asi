@@ -7,31 +7,21 @@ import { ROLE_LABELS, ROLES } from "../permissions";
 import type { Role, User } from "../types";
 import { BTN_SECONDARY, formatDate } from "../utils";
 
-// Musi zgadzać się z MIN_PASSWORD_LENGTH w src/api/users.rs.
-const MIN_PASSWORD = 10;
-
-function RoleOptions() {
-  return (
-    <>
-      {ROLES.map((role) => (
-        <option key={role} value={role}>
-          {ROLE_LABELS[role]}
-        </option>
-      ))}
-    </>
-  );
-}
-
 export function UsersPage() {
   const { data: users, error, reload } = useApiData(api.users.list);
   const { info, run } = useNotice();
 
-  const changeRole = (user: User, role: Role) =>
+  const update = (user: User, patch: { role?: Role; password?: string; disabled?: boolean }, message: string) =>
     run(async () => {
-      await api.users.changeRole(user.id, role);
-      info(`Zmieniono rolę użytkownika ${user.username} na: ${ROLE_LABELS[role]}`);
+      await api.users.update(user.id, patch);
+      info(message);
       await reload();
     });
+
+  const resetPassword = (user: User) => {
+    const password = prompt(`Nowe hasło dla ${user.username} (min. 10 znaków). Aktywne sesje zostaną zakończone.`);
+    if (password) update(user, { password }, `Zmieniono hasło użytkownika ${user.username}`);
+  };
 
   const remove = (user: User) =>
     run(async () => {
@@ -70,18 +60,44 @@ export function UsersPage() {
             {
               header: "Rola",
               render: (u) => (
-                <select aria-label={`Rola użytkownika ${u.username}`} value={u.role} onChange={(e) => changeRole(u, e.target.value as Role)}>
-                  <RoleOptions />
+                <select
+                  aria-label={`Rola ${u.username}`}
+                  value={u.roles[0] ?? "viewer"}
+                  onChange={(e) => update(u, { role: e.target.value as Role }, `Zmieniono rolę użytkownika ${u.username}`)}
+                >
+                  {ROLES.map((role) => (
+                    <option key={role} value={role}>
+                      {ROLE_LABELS[role]}
+                    </option>
+                  ))}
                 </select>
+              ),
+            },
+            {
+              header: "Aktywne",
+              render: (u) => (
+                <input
+                  type="checkbox"
+                  aria-label={`Konto ${u.username} aktywne`}
+                  checked={!u.disabled}
+                  onChange={(e) =>
+                    update(u, { disabled: !e.target.checked }, e.target.checked ? `Odblokowano ${u.username}` : `Zablokowano ${u.username}`)
+                  }
+                />
               ),
             },
             { header: "Utworzono", render: (u) => formatDate(u.created_at) },
             {
               header: "",
               render: (u) => (
-                <button className={BTN_SECONDARY} aria-label={`Usuń użytkownika ${u.username}`} onClick={() => remove(u)}>
-                  Usuń
-                </button>
+                <div className="flex gap-1">
+                  <button className={BTN_SECONDARY} aria-label={`Reset hasła użytkownika ${u.username}`} onClick={() => resetPassword(u)}>
+                    Reset hasła
+                  </button>
+                  <button className={BTN_SECONDARY} aria-label={`Usuń użytkownika ${u.username}`} onClick={() => remove(u)}>
+                    Usuń
+                  </button>
+                </div>
               ),
             },
           ]}
@@ -91,11 +107,7 @@ export function UsersPage() {
   );
 }
 
-interface NewUserFormProps {
-  onCreate: (username: string, password: string, role: Role) => Promise<void>;
-}
-
-function NewUserForm({ onCreate }: NewUserFormProps) {
+function NewUserForm({ onCreate }: { onCreate: (username: string, password: string, role: Role) => Promise<void> }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("viewer");
@@ -109,26 +121,23 @@ function NewUserForm({ onCreate }: NewUserFormProps) {
 
   return (
     <form className="my-2 flex flex-wrap items-center gap-2" onSubmit={handleSubmit}>
-      <label htmlFor="new-user-login">Login</label>
-      <input id="new-user-login" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} />
-      <label htmlFor="new-user-password">Hasło</label>
+      <input aria-label="Login" placeholder="login" value={username} onChange={(e) => setUsername(e.target.value)} />
       <input
-        id="new-user-password"
+        aria-label="Hasło"
+        placeholder="hasło (min. 10 znaków)"
         type="password"
         autoComplete="new-password"
-        minLength={MIN_PASSWORD}
-        aria-describedby="new-user-password-hint"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
-      <span id="new-user-password-hint" className="text-muted">
-        min. {MIN_PASSWORD} znaków
-      </span>
-      <label htmlFor="new-user-role">Rola</label>
-      <select id="new-user-role" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-        <RoleOptions />
+      <select aria-label="Rola" value={role} onChange={(e) => setRole(e.target.value as Role)}>
+        {ROLES.map((r) => (
+          <option key={r} value={r}>
+            {ROLE_LABELS[r]}
+          </option>
+        ))}
       </select>
-      <button type="submit" disabled={!username.trim() || password.length < MIN_PASSWORD}>
+      <button type="submit" disabled={!username || password.length < 10}>
         Dodaj
       </button>
     </form>

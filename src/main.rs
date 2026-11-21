@@ -14,7 +14,6 @@ mod model;
 mod pipeline;
 mod scanner;
 mod scheduler;
-mod settings;
 mod state;
 
 use anyhow::{Context, Result};

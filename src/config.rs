@@ -2,7 +2,7 @@
 //! Sekrety (klucz danych, tokeny) są czytane ze zmiennych środowiskowych, nie z tego pliku.
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -23,6 +23,9 @@ pub struct ServerConfig {
     pub bind: String,
     #[serde(default = "default_session_hours")]
     pub session_hours: i64,
+    /// Atrybut `Secure` cookie sesji. Włącz, gdy aplikacja działa za HTTPS.
+    #[serde(default)]
+    pub cookie_secure: bool,
     /// Katalog ze zbudowanym frontendem (`npm run build` w `frontend/`).
     #[serde(default = "default_static_dir")]
     pub static_dir: String,
@@ -70,7 +73,7 @@ pub struct ScanConfig {
     pub recheck_missing: bool,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct ScheduleConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -80,7 +83,7 @@ pub struct ScheduleConfig {
     pub windows: Vec<WindowConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct WindowConfig {
     /// Czas lokalny w formacie HH:MM.
     pub start: String,
@@ -138,4 +141,20 @@ fn default_every_hours() -> i64 {
 
 fn default_token_env() -> String {
     "ASI_DD_TOKEN".into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cookie_secure_from_file_and_default() {
+        let config: Config = toml::from_str(include_str!("../config/asi.toml")).unwrap();
+        assert!(!config.server.cookie_secure);
+
+        let server: ServerConfig = toml::from_str("bind = \"127.0.0.1:8080\"\ncookie_secure = true").unwrap();
+        assert!(server.cookie_secure);
+        let server: ServerConfig = toml::from_str("bind = \"127.0.0.1:8080\"").unwrap();
+        assert!(!server.cookie_secure);
+    }
 }
