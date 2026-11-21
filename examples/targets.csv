@@ -1,0 +1,4 @@
+target,tags,note
+10.10.0.0/24,lab;dmz,Podsieć laboratoryjna
+10.10.1.15,web,Serwer WWW działu
+intranet.example.local,intranet,

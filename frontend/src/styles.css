@@ -1,0 +1,257 @@
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --text: #1d2330;
+  --muted: #667085;
+  --border: #e4e7ec;
+  --accent: #2563eb;
+  --accent-text: #ffffff;
+  --green: #16a34a;
+  --red: #dc2626;
+  --orange: #d97706;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f141c;
+    --surface: #171e29;
+    --text: #e6e9ef;
+    --muted: #98a2b3;
+    --border: #283244;
+    --accent: #60a5fa;
+    --accent-text: #0f141c;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+main {
+  max-width: 1300px;
+  margin: 0 auto;
+  padding: 20px 16px;
+}
+
+/* Pasek nawigacji */
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar .spacer {
+  flex: 1;
+}
+
+.tab {
+  background: none;
+  color: var(--muted);
+  padding: 6px 10px;
+}
+
+.tab.active {
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Karty i układ */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.card-header h3 {
+  margin: 0;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.login {
+  max-width: 340px;
+  margin: 12vh auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Statystyki */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.stat-label,
+.stat-hint {
+  color: var(--muted);
+}
+
+.stat-hint {
+  font-size: 12px;
+}
+
+/* Tabele */
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  word-break: break-word;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* Formularze */
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input,
+select,
+textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+input.narrow {
+  width: 80px;
+}
+
+textarea {
+  width: 100%;
+  min-height: 110px;
+}
+
+textarea.code {
+  font-family: ui-monospace, monospace;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 14px;
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+button.secondary {
+  background: none;
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Etykiety i komunikaty */
+
+.muted {
+  color: var(--muted);
+}
+
+.notice {
+  color: var(--muted);
+}
+
+.notice.error {
+  color: var(--red);
+}
+
+.badge {
+  display: inline-block;
+  margin: 1px 4px 1px 0;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  background: var(--bg);
+  font-size: 12px;
+}
+
+.kind-new,
+.status-completed {
+  color: var(--green);
+}
+
+.kind-gone,
+.kind-host_inactive,
+.status-failed {
+  color: var(--red);
+}
+
+.kind-changed,
+.status-partial {
+  color: var(--orange);
+}
+
+.kind-host_returned,
+.status-running {
+  color: var(--accent);
+}

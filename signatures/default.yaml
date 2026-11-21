@@ -1,0 +1,313 @@
+# Wbudowane sygnatury ASI.
+# Sygnatury służą tylko do pasywnej detekcji: nagłówki, ciasteczka, fragmenty HTML,
+# tytuł, hash favicony, ścieżki pobierane metodą GET bez prób logowania, bannery z nmap.
+#
+# Format:
+#   id, name, category (cms|framework|server|application|iot|admin_panel|staging|interesting)
+#   confidence: 0-100 (bazowa pewność), match: any|all
+#   rules: header | cookie | body | title | path | favicon_sha256 | service | hostname | port
+#   version: { source: body|header|title|service, header: <nazwa>, regex: '(grupa 1 = wersja)' }
+# Regexy są case-insensitive. Ciasteczko 'prefix*' dopasowuje po prefiksie.
+
+# CMS
+- id: wordpress
+  name: WordPress
+  category: cms
+  confidence: 90
+  rules:
+    - type: body
+      regex: '/wp-(content|includes)/'
+    - type: cookie
+      name: 'wordpress_*'
+    - type: path
+      path: /wp-login.php
+      status: [200]
+      body_regex: 'user_login'
+  version:
+    source: body
+    regex: '<meta name="generator" content="WordPress ([\d.]+)"'
+
+- id: joomla
+  name: Joomla
+  category: cms
+  confidence: 85
+  rules:
+    - type: body
+      regex: '/media/(jui|system/js)/|content="Joomla!'
+    - type: path
+      path: /administrator/
+      body_regex: 'Joomla|mod-login'
+
+- id: drupal
+  name: Drupal
+  category: cms
+  confidence: 85
+  rules:
+    - type: header
+      name: x-generator
+      regex: 'Drupal'
+    - type: header
+      name: x-drupal-cache
+    - type: body
+      regex: 'Drupal\.settings|/sites/(default|all)/(files|modules)'
+  version:
+    source: header
+    header: x-generator
+    regex: 'Drupal (\d+)'
+
+# Serwery
+- id: nginx
+  name: nginx
+  category: server
+  confidence: 90
+  rules:
+    - type: header
+      name: server
+      regex: 'nginx'
+    - type: service
+      regex: 'nginx'
+  version:
+    source: header
+    header: server
+    regex: 'nginx/([\d.]+)'
+
+- id: apache-httpd
+  name: Apache httpd
+  category: server
+  confidence: 90
+  rules:
+    - type: header
+      name: server
+      regex: '^Apache'
+    - type: service
+      regex: 'Apache httpd'
+  version:
+    source: header
+    header: server
+    regex: 'Apache/([\d.]+)'
+
+- id: iis
+  name: Microsoft IIS
+  category: server
+  confidence: 90
+  rules:
+    - type: header
+      name: server
+      regex: 'Microsoft-IIS'
+  version:
+    source: header
+    header: server
+    regex: 'IIS/([\d.]+)'
+
+- id: tomcat
+  name: Apache Tomcat
+  category: server
+  confidence: 85
+  rules:
+    - type: body
+      regex: 'Apache Tomcat'
+    - type: service
+      regex: 'Tomcat'
+  version:
+    source: body
+    regex: 'Apache Tomcat/([\d.]+)'
+
+# Frameworki
+- id: php
+  name: PHP
+  category: framework
+  confidence: 80
+  rules:
+    - type: header
+      name: x-powered-by
+      regex: 'PHP'
+    - type: cookie
+      name: PHPSESSID
+  version:
+    source: header
+    header: x-powered-by
+    regex: 'PHP/([\d.]+)'
+
+- id: aspnet
+  name: ASP.NET
+  category: framework
+  confidence: 85
+  rules:
+    - type: header
+      name: x-aspnet-version
+    - type: header
+      name: x-powered-by
+      regex: 'ASP\.NET'
+    - type: cookie
+      name: ASP.NET_SessionId
+  version:
+    source: header
+    header: x-aspnet-version
+    regex: '([\d.]+)'
+
+- id: laravel
+  name: Laravel
+  category: framework
+  confidence: 85
+  rules:
+    - type: cookie
+      name: laravel_session
+
+- id: django
+  name: Django
+  category: framework
+  confidence: 75
+  rules:
+    - type: cookie
+      name: csrftoken
+    - type: body
+      regex: 'csrfmiddlewaretoken'
+
+- id: express
+  name: Express (Node.js)
+  category: framework
+  confidence: 80
+  rules:
+    - type: header
+      name: x-powered-by
+      regex: 'Express'
+
+- id: spring-boot
+  name: Spring Boot
+  category: framework
+  confidence: 75
+  rules:
+    - type: body
+      regex: 'Whitelabel Error Page'
+
+# Aplikacje
+- id: jenkins
+  name: Jenkins
+  category: application
+  confidence: 90
+  rules:
+    - type: header
+      name: x-jenkins
+    - type: title
+      regex: 'Jenkins'
+  version:
+    source: header
+    header: x-jenkins
+    regex: '([\d.]+)'
+
+- id: grafana
+  name: Grafana
+  category: application
+  confidence: 85
+  rules:
+    - type: title
+      regex: '^Grafana'
+    - type: body
+      regex: 'grafana-app|window\.grafanaBootData'
+
+# Panele administracyjne
+- id: phpmyadmin
+  name: phpMyAdmin
+  category: admin_panel
+  confidence: 90
+  rules:
+    - type: title
+      regex: 'phpMyAdmin'
+    - type: cookie
+      name: phpMyAdmin
+    - type: path
+      path: /phpmyadmin/
+      body_regex: 'phpMyAdmin'
+
+- id: admin-path
+  name: Ścieżka /admin
+  category: admin_panel
+  confidence: 50
+  rules:
+    - type: path
+      path: /admin
+      status: [200, 401, 403]
+
+- id: login-form
+  name: Formularz logowania
+  category: admin_panel
+  confidence: 60
+  rules:
+    - type: body
+      regex: '<input[^>]+type=["'']?password'
+    - type: title
+      regex: 'log ?in|sign ?in|logowanie|zaloguj|admin'
+
+# Środowiska testowe
+- id: staging-env
+  name: Środowisko testowe / staging
+  category: staging
+  confidence: 65
+  rules:
+    - type: hostname
+      regex: '(^|[.-])(dev|test|tst|stag(e|ing)|uat|qa|preprod|demo|sandbox)([.-]|\d|$)'
+    - type: title
+      regex: '\b(staging|testing|test environment|development|dev server)\b'
+    - type: header
+      name: x-environment
+
+# Ciekawe artefakty
+- id: symfony-profiler
+  name: Symfony Profiler (tryb debug)
+  category: interesting
+  confidence: 90
+  rules:
+    - type: header
+      name: x-debug-token-link
+
+- id: apache-server-status
+  name: Apache server-status publicznie dostępny
+  category: interesting
+  confidence: 90
+  rules:
+    - type: path
+      path: /server-status
+      status: [200]
+      body_regex: 'Apache Server Status'
+
+- id: version-disclosure
+  name: Ujawnienie wersji w nagłówkach
+  category: interesting
+  confidence: 50
+  rules:
+    - type: header
+      name: server
+      regex: '/\d+\.\d+'
+    - type: header
+      name: x-powered-by
+      regex: '\d+\.\d+'
+
+# IoT / urządzenia
+- id: embedded-webserver
+  name: Wbudowany serwer WWW (urządzenie)
+  category: iot
+  confidence: 55
+  rules:
+    - type: header
+      name: server
+      regex: 'GoAhead|Boa/|mini_httpd|uc-httpd|RomPager|thttpd|Hikvision-Webs|App-webs'
+
+- id: mikrotik
+  name: MikroTik RouterOS
+  category: iot
+  confidence: 85
+  rules:
+    - type: title
+      regex: 'RouterOS'
+    - type: body
+      regex: 'mikrotik'
+
+- id: network-printer
+  name: Drukarka sieciowa
+  category: iot
+  confidence: 70
+  rules:
+    - type: service
+      regex: 'jetdirect|printer|ipp'
+    - type: port
+      port: 9100

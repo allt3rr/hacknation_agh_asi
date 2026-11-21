@@ -1,0 +1,90 @@
+# Uruchomienie:
+#   docker compose up -d --build                   skaner i dashboard (http://127.0.0.1:8080)
+#   docker compose --profile lab up -d --build     to samo plus lokalne usługi testowe
+name: asi
+
+services:
+  asi:
+    build: .
+    image: asi-scanner:dev
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ASI_BIND: 0.0.0.0:8080
+    volumes:
+      - asi-data:/app/data
+      # konfigurację i sygnatury można zmieniać bez przebudowy obrazu
+      - ./config:/app/config:ro
+      - ./signatures:/app/signatures:ro
+      - ./examples:/app/examples:ro
+    networks:
+      - default
+      - lab
+    # SYN scan i wykrywanie hostów przez ICMP wymagają surowych gniazd:
+    # user: root
+    # cap_add: [NET_RAW, NET_ADMIN]
+
+  # Laboratorium (profil "lab"): kilka usług do sprawdzenia detekcji.
+  # Sieć 172.30.0.0/24 jest wewnętrzna: skaner ją widzi, kontenery nie mają dostępu do internetu.
+
+  lab-nginx:
+    image: nginx:1.27-alpine
+    profiles: ["lab"]
+    networks:
+      lab:
+        ipv4_address: 172.30.0.10
+
+  lab-httpd:
+    image: httpd:2.4-alpine
+    profiles: ["lab"]
+    networks:
+      lab:
+        ipv4_address: 172.30.0.11
+
+  lab-tomcat:
+    image: tomcat:10.1-jre17
+    profiles: ["lab"]
+    networks:
+      lab:
+        ipv4_address: 172.30.0.12
+
+  lab-wordpress:
+    image: wordpress:6.6-apache
+    profiles: ["lab"]
+    depends_on:
+      - lab-wp-db
+    environment:
+      WORDPRESS_DB_HOST: lab-wp-db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: lab-only-password
+      WORDPRESS_DB_NAME: wordpress
+    networks:
+      lab:
+        ipv4_address: 172.30.0.13
+
+  lab-wp-db:
+    image: mariadb:11.4
+    profiles: ["lab"]
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: lab-only-password
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
+    networks:
+      lab:
+        ipv4_address: 172.30.0.14
+
+networks:
+  lab:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  asi-data:

@@ -1,0 +1,24 @@
+# Rust
+/target/
+*.rs.bk
+
+# Frontend
+/frontend/node_modules/
+/frontend/dist/
+
+# Dane lokalne i sekrety
+/data/
+*.db
+*.db-shm
+*.db-wal
+.env
+
+# IDE i narzędzia lokalne
+.idea/
+.vscode/
+.claude/
+openspec/
+
+# Materiały konkursowe (nie trafiają do repozytorium)
+AGH - Pełna treść zadania konkursowego.pdf
+AGH - Regulamin zadania konkursowego.pdf

@@ -1,0 +1,17 @@
+target
+data
+.env
+.env.*
+!.env.example
+*.pdf
+*.md
+.git
+.gitignore
+.gitattributes
+.claude
+.vscode
+.idea
+Dockerfile
+docker-compose.yml
+frontend/node_modules
+frontend/dist
