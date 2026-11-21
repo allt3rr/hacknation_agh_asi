@@ -1,5 +1,6 @@
 # Rust
 /target/
+/backend/target/
 *.rs.bk
 
 # Frontend
@@ -22,3 +23,12 @@ openspec/
 # Materiały konkursowe (nie trafiają do repozytorium)
 AGH - Pełna treść zadania konkursowego.pdf
 AGH - Regulamin zadania konkursowego.pdf
+
+node_modules/
+Cargo.lock
+# lockfile nowego backendu wersjonujemy (powtarzalny build, cargo --locked)
+!backend/Cargo.lock
+CLAUDE.md
+package-lock.json
+package.json
+docs/ATTACK_SURFACE_INTELLIGENCE.md

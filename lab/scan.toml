@@ -1,0 +1,8 @@
+# Konfiguracja skanu dla laboratorium (ASI_SCAN_CONFIG=lab/scan.toml): porty usług labu.
+ports = "22,80,443,3000,3306,8080,8443"
+global_max_rate = 1000
+concurrency = 2
+chunk_size = 16
+min_chunk = 4
+host_timeout = "2m"
+inactive_after_misses = 2

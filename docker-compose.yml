@@ -1,27 +1,61 @@
 # Uruchomienie:
-#   docker compose up -d --build                   skaner i dashboard (http://127.0.0.1:8080)
-#   docker compose --profile lab up -d --build     to samo plus lokalne usługi testowe
-name: asi
+#   docker compose up -d --build                    baza + backend ze skanerem i interfejsem (http://127.0.0.1:8080)
+#   docker compose --profile lab up -d --build      to samo plus laboratorium (sieć 172.30.100.0/24)
+# Konto demo: admin / admin. Zmienne: ASI_PORT, ASI_PROJECT, ASI_DB_PASSWORD, ASI_SCAN_CONFIG, ASI_DD_*.
+name: ${ASI_PROJECT:-asi}
 
 services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: asi
+      POSTGRES_USER: asi
+      POSTGRES_PASSWORD: ${ASI_DB_PASSWORD:-asi-demo}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U asi -d asi"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Klucz szyfrowania pól tworzony raz, w osobnym wolumenie (nie w wolumenie bazy).
+  # W produkcji zamiast tego dostarcz plik klucza z zewnętrznego źródła sekretów (ASI_MASTER_KEY_FILE).
+  keygen:
+    image: alpine:3.22
+    command:
+      - sh
+      - -c
+      - test -s /keys/master_key || (umask 077 && head -c 32 /dev/urandom | base64 > /keys/master_key); chown 10001 /keys/master_key
+    volumes:
+      - asi-keys:/keys
+
   asi:
     build: .
-    image: asi-scanner:dev
+    image: asi:dev
     restart: unless-stopped
     init: true
-    ports:
-      - "127.0.0.1:8080:8080"
-    env_file:
-      - path: .env
-        required: false
+    depends_on:
+      db:
+        condition: service_healthy
+      keygen:
+        condition: service_completed_successfully
     environment:
-      ASI_BIND: 0.0.0.0:8080
+      DATABASE_URL: postgres://asi:${ASI_DB_PASSWORD:-asi-demo}@db:5432/asi
+      ASI_MASTER_KEY_FILE: /run/asi-keys/master_key
+      ASI_COOKIE_SECURE: ${ASI_COOKIE_SECURE:-false}
+      ASI_SESSION_TTL_HOURS: ${ASI_SESSION_TTL_HOURS:-12}
+      ASI_DD_URL: ${ASI_DD_URL:-}
+      ASI_DD_TOKEN: ${ASI_DD_TOKEN:-}
+      ASI_DD_ENGAGEMENT: ${ASI_DD_ENGAGEMENT:-}
     volumes:
-      - asi-data:/app/data
-      # konfigurację i sygnatury można zmieniać bez przebudowy obrazu
-      - ./config:/app/config:ro
+      - asi-keys:/run/asi-keys:ro
+      # konfigurację skanu i sygnatury można zmieniać bez przebudowy obrazu
+      - ./${ASI_SCAN_CONFIG:-backend/config/scan.toml}:/app/config/scan.toml:ro
       - ./signatures:/app/signatures:ro
-      - ./examples:/app/examples:ro
+    ports:
+      - "127.0.0.1:${ASI_PORT:-8080}:8080"
     networks:
       - default
       - lab
@@ -29,29 +63,30 @@ services:
     # user: root
     # cap_add: [NET_RAW, NET_ADMIN]
 
-  # Laboratorium (profil "lab"): kilka usług do sprawdzenia detekcji.
-  # Sieć 172.30.0.0/24 jest wewnętrzna: skaner ją widzi, kontenery nie mają dostępu do internetu.
+  # Laboratorium (profil "lab"): sieć wewnętrzna 172.30.100.0/24 bez dostępu do internetu.
 
-  lab-nginx:
+  lab-nginx-debug:
     image: nginx:1.27-alpine
     profiles: ["lab"]
+    volumes:
+      - ./lab/nginx-debug.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       lab:
-        ipv4_address: 172.30.0.10
+        ipv4_address: 172.30.100.10
 
   lab-httpd:
     image: httpd:2.4-alpine
     profiles: ["lab"]
     networks:
       lab:
-        ipv4_address: 172.30.0.11
+        ipv4_address: 172.30.100.11
 
   lab-tomcat:
     image: tomcat:10.1-jre17
     profiles: ["lab"]
     networks:
       lab:
-        ipv4_address: 172.30.0.12
+        ipv4_address: 172.30.100.12
 
   lab-wordpress:
     image: wordpress:6.6-apache
@@ -65,7 +100,7 @@ services:
       WORDPRESS_DB_NAME: wordpress
     networks:
       lab:
-        ipv4_address: 172.30.0.13
+        ipv4_address: 172.30.100.13
 
   lab-wp-db:
     image: mariadb:11.4
@@ -77,14 +112,31 @@ services:
       MARIADB_RANDOM_ROOT_PASSWORD: "1"
     networks:
       lab:
-        ipv4_address: 172.30.0.14
+        ipv4_address: 172.30.100.14
+
+  lab-grafana:
+    image: grafana/grafana-oss:11.2.0
+    profiles: ["lab"]
+    networks:
+      lab:
+        ipv4_address: 172.30.100.15
+
+  lab-selfsigned:
+    image: caddy:2.8-alpine
+    profiles: ["lab"]
+    volumes:
+      - ./lab/Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      lab:
+        ipv4_address: 172.30.100.16
 
 networks:
   lab:
     internal: true
     ipam:
       config:
-        - subnet: 172.30.0.0/24
+        - subnet: 172.30.100.0/24
 
 volumes:
-  asi-data:
+  pgdata:
+  asi-keys:
