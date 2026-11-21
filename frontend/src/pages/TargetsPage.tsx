@@ -14,8 +14,8 @@ function summaryText(s: ImportSummary): string {
   const rejected = s.rejected.length
     ? `, odrzucono ${s.rejected.length}: ${s.rejected.slice(0, 10).map((r) => `${r.value} (wiersz ${r.row})`).join(", ")}`
     : "";
-  const prefix = s.dry_run ? "Podgląd: zostałoby dodanych" : "Dodano";
-  return `${prefix} ${s.accepted} (wierszy: ${s.rows}, duplikatów: ${s.duplicates}${rejected})`;
+  const prefix = s.dry_run ? "Sprawdzono plik (nic nie zapisano). Do dodania:" : "Dodano celów:";
+  return `${prefix} ${s.accepted}. Wierszy: ${s.rows}, duplikatów: ${s.duplicates}${rejected}`;
 }
 
 export function TargetsPage({ session }: { session: Session }) {
@@ -42,7 +42,7 @@ export function TargetsPage({ session }: { session: Session }) {
       {can(session, "targets.create") && (
         <Card title="Dodaj cele">
           <label htmlFor="targets-text" className="mb-1 block">
-            Adresy IP, zakresy CIDR lub domeny (jeden na linię)
+            Adresy IP, zakresy CIDR lub domeny, po jednym w wierszu
           </label>
           <textarea
             id="targets-text"
@@ -55,10 +55,10 @@ export function TargetsPage({ session }: { session: Session }) {
             <button onClick={addManually} disabled={!text.trim()}>
               Dodaj ręcznie
             </button>
-            <span className="text-muted">lub plik CSV (target,tags,note albo format organizatora z ip_address), JSON, TXT:</span>
+            <span className="text-muted">albo plik: CSV (kolumny target, tags, note lub plik organizatora z kolumną ip_address), JSON lub TXT:</span>
             <FilePicker accept=".csv,.json,.txt" label="Plik z celami (CSV, JSON lub TXT)" buttonLabel="Importuj plik" onSubmit={importFile} />
             <label className="text-muted">
-              <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} /> tylko podgląd
+              <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} /> tylko sprawdź plik, bez zapisu
             </label>
           </div>
         </Card>

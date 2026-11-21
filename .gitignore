@@ -13,6 +13,8 @@
 *.db-shm
 *.db-wal
 .env
+asi_import.csv
+network_addresses_services_10k.csv
 
 # IDE i narzędzia lokalne
 .idea/

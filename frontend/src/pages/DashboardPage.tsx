@@ -4,6 +4,7 @@ import { Card } from "../components/Card";
 import { ChangeTable } from "../components/ChangeTable";
 import { DataTable } from "../components/DataTable";
 import { StatCard } from "../components/StatCard";
+import { IconActivity, IconAlert, IconRadar, IconRefresh, IconServer, IconTarget } from "../components/icons";
 import { useApiData } from "../hooks";
 import type { Dashboard, Run } from "../types";
 import { BADGE, BTN_SECONDARY, STATUS_LABELS, formatDate, formatDuration } from "../utils";
@@ -56,12 +57,23 @@ export function DashboardPage() {
 
   return (
     <>
-      <Card title="Podsumowanie" actions={<button className={BTN_SECONDARY} onClick={refresh}>Odśwież</button>}>
-        <Stats dashboard={data} />
+      <Card
+        title="Podsumowanie"
+        actions={
+          <button className={`${BTN_SECONDARY} flex items-center gap-1.5`} onClick={refresh}>
+            <IconRefresh className="size-4" />
+            Odśwież
+          </button>
+        }
+      >
+        <div className="grid gap-5 xl:grid-cols-[1fr_17rem]">
+          <Stats dashboard={data} />
+          <HostDonut assets={data.assets} />
+        </div>
       </Card>
 
       <Card title="Najważniejsze znaleziska">
-        <p className="mb-2 text-muted">Panele administracyjne, środowiska testowe, urządzenia IoT i inne interesujące usługi z ostatniego przebiegu.</p>
+        <p className="mb-2 text-muted">Usługi z ostatniego skanu rozpoznane jako panel administracyjny, środowisko testowe (staging) lub inne oznaczone jako interesujące.</p>
         <DataTable
           label="Najważniejsze znaleziska"
           filterBy={(f) => [f.ip, f.name, f.category, f.title].join(" ")}
@@ -91,7 +103,7 @@ export function DashboardPage() {
             <RunHistory runs={finished.slice(0, HISTORY_RUNS)} />
           </Card>
           <Card title="Różnice zależne od pory dnia">
-            <p className="mb-2 text-muted">Średnie ze skanów według godziny startu. Duże różnice wskazują hosty widoczne tylko w części doby.</p>
+            <p className="mb-2 text-muted">Średnia liczba aktywnych hostów i usług w skanach rozpoczętych o danej porze (czas przeglądarki). Różnica między porami oznacza hosty dostępne tylko w części doby.</p>
             <TimeOfDay runs={finished} />
           </Card>
         </>
@@ -116,21 +128,86 @@ export function DashboardPage() {
 function Stats({ dashboard: d }: { dashboard: Dashboard }) {
   const run = d.latest_run;
   const when = run ? formatDate(run.started_at ?? run.created_at) : "";
+  const icon = "size-5";
   return (
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
-      <StatCard label="Cele" value={d.targets} />
-      <StatCard label="Hosty aktywne" value={d.assets.active ?? 0} />
-      <StatCard label="Hosty niestabilne" value={d.assets.unstable ?? 0} />
-      <StatCard label="Hosty nieaktywne" value={d.assets.inactive ?? 0} />
-      <StatCard label="Usługi" value={d.services} />
-      <StatCard label="Zmiany" value={d.changes_total} />
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-3">
+      <StatCard label="Cele" value={d.targets} icon={<IconTarget className={icon} />} />
+      <StatCard label="Hosty aktywne" value={d.assets.active ?? 0} tone="green" icon={<IconServer className={icon} />} />
+      <StatCard label="Hosty niestabilne" value={d.assets.unstable ?? 0} tone="orange" icon={<IconActivity className={icon} />} />
+      <StatCard label="Hosty nieaktywne" value={d.assets.inactive ?? 0} tone="muted" icon={<IconServer className={icon} />} />
+      <StatCard label="Usługi" value={d.services} icon={<IconRadar className={icon} />} />
+      <StatCard label="Zmiany" value={d.changes_total} tone={d.changes_total ? "orange" : "muted"} icon={<IconAlert className={icon} />} />
       <StatCard
         label="Ostatni przebieg"
         value={run ? STATUS_LABELS[run.status] ?? run.status : "brak"}
         hint={run ? (run.duration_ms != null ? `${when}, czas: ${formatDuration(run.duration_ms)}` : when) : undefined}
+        tone={run?.status === "failed" ? "red" : run?.status === "partial" ? "orange" : "green"}
+        icon={<IconActivity className={icon} />}
       />
-      <StatCard label="Skan w toku" value={d.scan_running ? "tak" : "nie"} />
+      <StatCard
+        label="Skan w toku"
+        value={
+          <span className="inline-flex items-center gap-2">
+            {d.scan_running && <span aria-hidden="true" className="animate-pulse-dot size-2.5 rounded-full bg-accent" />}
+            {d.scan_running ? "tak" : "nie"}
+          </span>
+        }
+        tone={d.scan_running ? "accent" : "muted"}
+        icon={<IconRadar className={icon} />}
+      />
     </div>
+  );
+}
+
+/** Pierścień stanu hostów. Liczby są w legendzie (tekst), wykres tylko je ilustruje. */
+function HostDonut({ assets }: { assets: Dashboard["assets"] }) {
+  const parts = [
+    { label: "aktywne", value: assets.active ?? 0, color: "var(--color-green)" },
+    { label: "niestabilne", value: assets.unstable ?? 0, color: "var(--color-orange)" },
+    { label: "nieaktywne", value: assets.inactive ?? 0, color: "var(--color-muted)" },
+  ];
+  const total = parts.reduce((sum, p) => sum + p.value, 0);
+  const r = 42;
+  const length = 2 * Math.PI * r;
+  let offset = 0;
+  return (
+    <figure className="flex items-center gap-4 rounded-xl border border-line bg-surface/60 p-4">
+      <svg viewBox="0 0 100 100" className="size-28 shrink-0 -rotate-90" aria-hidden="true">
+        <circle cx="50" cy="50" r={r} fill="none" stroke="var(--color-surface-2)" strokeWidth="11" />
+        {total > 0 &&
+          parts.map((p) => {
+            const dash = (p.value / total) * length;
+            const el = (
+              <circle
+                key={p.label}
+                cx="50"
+                cy="50"
+                r={r}
+                fill="none"
+                stroke={p.color}
+                strokeWidth="11"
+                strokeDasharray={`${dash} ${length - dash}`}
+                strokeDashoffset={-offset}
+                className="transition-[stroke-dasharray] duration-700"
+              />
+            );
+            offset += dash;
+            return el;
+          })}
+      </svg>
+      <figcaption>
+        <div className="text-2xl font-semibold tabular-nums">{total}</div>
+        <div className="mb-2 text-muted">hostów łącznie</div>
+        <ul className="space-y-1 text-sm">
+          {parts.map((p) => (
+            <li key={p.label} className="flex items-center gap-2">
+              <span aria-hidden="true" className="size-2.5 rounded-full" style={{ background: p.color }} />
+              {p.label}: <span className="font-medium tabular-nums">{p.value}</span>
+            </li>
+          ))}
+        </ul>
+      </figcaption>
+    </figure>
   );
 }
 
@@ -150,7 +227,7 @@ function RunHistory({ runs }: { runs: Run[] }) {
           render: (r) => (
             <div className="flex items-center gap-2">
               <span className="w-10 text-right tabular-nums">{r.coverage.live_hosts ?? 0}</span>
-              <span aria-hidden="true" className="h-2.5 rounded-sm bg-accent" style={{ width: `${((r.coverage.live_hosts ?? 0) / maxHosts) * 160}px` }} />
+              <span aria-hidden="true" className="brand-gradient h-2.5 rounded-full" style={{ width: `${((r.coverage.live_hosts ?? 0) / maxHosts) * 160}px` }} />
             </div>
           ),
         },

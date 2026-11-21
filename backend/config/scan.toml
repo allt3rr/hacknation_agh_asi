@@ -29,6 +29,7 @@ inactive_after_misses = 3
 recheck_missing = true
 max_chunk_attempts = 3
 
+# Harmonogram zapisany w interfejsie (zakładka Harmonogram) zastępuje tę sekcję.
 [schedule]
 enabled = false
 every_hours = 24

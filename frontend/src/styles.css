@@ -1,53 +1,90 @@
 @import "tailwindcss";
 
-/* Kolory jako tokeny Tailwinda: bg-surface, text-muted, border-line itd.
-   Kolory tekstu statusów mają kontrast >= 4.5:1 (WCAG 1.4.3) na tle bg i surface,
-   a `field` (obramowanie pól formularza) >= 3:1 (WCAG 1.4.11). */
+/* Tokeny kolorów jako klasy Tailwinda: bg-surface, text-muted, border-line itd.
+   Tekst (fg, muted, accent, statusy) ma kontrast >= 4.5:1 na bg/surface/surface-2 w obu motywach
+   (WCAG 1.4.3), a `field` (obramowanie pól) >= 3:1 (WCAG 1.4.11). accent-2 służy tylko do dekoracji. */
 @theme {
-  --color-bg: #f6f7f9;
+  --color-bg: #f4f6fb;
   --color-surface: #ffffff;
-  --color-fg: #1d2330;
-  --color-muted: #667085;
-  --color-line: #e4e7ec;
+  --color-surface-2: #eef2fa;
+  --color-fg: #0f172a;
+  --color-muted: #556074;
+  --color-line: #e2e8f0;
   --color-field: #7b8494;
-  --color-accent: #2563eb;
+  --color-accent: #4f46e5;
+  --color-accent-2: #0891b2;
   --color-accent-fg: #ffffff;
-  --color-green: #15803d;
-  --color-red: #dc2626;
-  --color-orange: #b45309;
+  --color-green: #166534;
+  --color-red: #c81e1e;
+  --color-orange: #9a4a05;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px -12px rgb(15 23 42 / 0.12);
+  --glow: rgb(79 70 229 / 0.18);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-bg: #0f141c;
-    --color-surface: #171e29;
-    --color-fg: #e6e9ef;
-    --color-muted: #98a2b3;
-    --color-line: #283244;
-    --color-field: #6b7a94;
-    --color-accent: #60a5fa;
-    --color-accent-fg: #0f141c;
+    --color-bg: #070b14;
+    --color-surface: #0f1626;
+    --color-surface-2: #141d33;
+    --color-fg: #e7ecf6;
+    --color-muted: #9aa6bd;
+    --color-line: #1f2a40;
+    --color-field: #5d6c8c;
+    --color-accent: #a5b4fc;
+    --color-accent-2: #22d3ee;
+    --color-accent-fg: #0b1020;
     --color-green: #4ade80;
-    --color-red: #f87171;
+    --color-red: #fb7185;
     --color-orange: #fbbf24;
+    --shadow-card: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 12px 32px -16px rgb(0 0 0 / 0.6);
+    --glow: rgb(129 140 248 / 0.22);
   }
 }
 
-/* Domyślny wygląd elementów, żeby nie powtarzać klas na każdym inpucie i przycisku. */
 @layer base {
+  html {
+    color-scheme: light dark;
+  }
+
   body {
-    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
-    @apply bg-bg text-fg;
+    font: 14px/1.5 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-feature-settings: "tnum" 1;
+    -webkit-font-smoothing: antialiased;
+    @apply min-h-screen bg-bg text-fg;
+    /* poświata i delikatna siatka "konsoli" w tle; czysto dekoracyjne */
+    background-image:
+      radial-gradient(60rem 40rem at 10% -10%, var(--glow), transparent 60%),
+      radial-gradient(50rem 30rem at 110% 10%, rgb(34 211 238 / 0.08), transparent 60%),
+      linear-gradient(color-mix(in srgb, var(--color-line) 55%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--color-line) 55%, transparent) 1px, transparent 1px);
+    background-size: auto, auto, 48px 48px, 48px 48px;
+    background-attachment: fixed;
+  }
+
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.01em;
   }
 
   input,
   select,
   textarea {
-    @apply rounded-md border border-field bg-bg px-2 py-1.5;
+    @apply rounded-lg border border-field bg-surface px-2.5 py-1.5 text-fg transition-[border-color,box-shadow] duration-150;
+  }
+
+  input:hover,
+  select:hover,
+  textarea:hover {
+    @apply border-accent;
+  }
+
+  input[type="checkbox"] {
+    @apply size-4 accent-(--color-accent);
   }
 
   button {
-    @apply cursor-pointer rounded-md bg-accent px-3.5 py-[7px] text-accent-fg disabled:cursor-default disabled:opacity-50;
+    @apply cursor-pointer rounded-lg bg-accent px-3.5 py-[7px] font-medium text-accent-fg shadow-sm transition-[transform,box-shadow,background-color,opacity] duration-150 hover:-translate-y-px hover:shadow-[0_6px_18px_-6px_var(--glow)] active:translate-y-0 disabled:cursor-default disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm;
   }
 
   /* Wyraźny wskaźnik fokusu dla klawiatury (WCAG 2.4.7). */
@@ -55,12 +92,80 @@
     @apply outline-2 outline-offset-2 outline-accent;
   }
 
+  table {
+    @apply border-separate border-spacing-0;
+  }
+
   th,
   td {
-    @apply border-b border-line px-2 py-1.5 text-left align-top break-words;
+    @apply border-b border-line px-3 py-2 text-left align-top break-words;
   }
 
   th {
-    @apply font-medium text-muted;
+    @apply bg-surface-2 text-xs font-semibold tracking-wide text-muted uppercase first:rounded-tl-lg last:rounded-tr-lg;
+  }
+
+  tbody tr {
+    @apply transition-colors duration-100 hover:bg-surface-2;
+  }
+
+  code {
+    @apply rounded bg-surface-2 px-1 py-px font-mono text-[0.9em];
+  }
+}
+
+@layer components {
+  /* Szklana karta: lekka przezroczystość nad tłem z poświatą. */
+  .glass {
+    @apply rounded-2xl border border-line bg-surface/85 backdrop-blur-md;
+    box-shadow: var(--shadow-card);
+  }
+
+  .brand-gradient {
+    background-image: linear-gradient(135deg, var(--color-accent), var(--color-accent-2));
+  }
+}
+
+/* Wejście kart: krótkie przesunięcie i pojawienie się. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes sweep {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes pulse-dot {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.animate-rise {
+  animation: rise 320ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.animate-sweep {
+  animation: sweep 4s linear infinite;
+  transform-origin: 50% 50%;
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+/* Bez ruchu dla osób, które go wyłączyły w systemie (WCAG 2.3.3). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

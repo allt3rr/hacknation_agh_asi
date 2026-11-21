@@ -262,3 +262,51 @@ async fn window_deadline_gives_partial_and_resume_goes_first(db: PgPool) {
         pending.len() - 1
     );
 }
+
+#[sqlx::test(migrator = "asi_db::MIGRATOR")]
+async fn schedule_is_editable_validated_and_used_by_start(db: PgPool) {
+    let noon = NaiveDateTime::parse_from_str("2026-11-21 12:00", "%Y-%m-%d %H:%M").unwrap();
+    let svc = service(Ok(cfg()), FakeRunner::default()).with_clock(Arc::new(move || noon));
+    let (st, admin) = setup(&db, svc).await;
+    add_user(&db, "viewer1", rbac::VIEWER).await;
+    let viewer = cookie_pair(&login_as(&st, "viewer1", PASSWORD).await);
+
+    let night = json!({ "enabled": true, "every_hours": 12,
+        "windows": [{ "start": "22:00", "end": "06:00", "days": ["mon", "fri"] }] });
+
+    // odczyt dla każdej roli, zapis tylko z scans.configure
+    let res = call(&st, "GET", "/api/v1/schedule", Some(&viewer), None).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let res = call(&st, "PUT", "/api/v1/schedule", Some(&viewer), Some(night.clone())).await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // błędne okno i częstotliwość są odrzucane
+    let bad_window = json!({ "enabled": true, "every_hours": 12, "windows": [{ "start": "25:00", "end": "06:00" }] });
+    let res = call(&st, "PUT", "/api/v1/schedule", Some(&admin), Some(bad_window)).await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let bad_every = json!({ "enabled": true, "every_hours": 0, "windows": [] });
+    let res = call(&st, "PUT", "/api/v1/schedule", Some(&admin), Some(bad_every)).await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    // zapis: widoczny w odczycie, w bazie, w dzienniku audytu i od razu w polityce startu (południe poza oknem)
+    let res = call(&st, "PUT", "/api/v1/schedule", Some(&admin), Some(night.clone())).await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let saved = body(call(&st, "GET", "/api/v1/schedule", Some(&viewer), None).await).await;
+    assert_eq!(saved, night);
+    let stored: Value = sqlx::query_scalar("SELECT value FROM scan_schedule").fetch_one(&db).await.unwrap();
+    assert_eq!(stored, night);
+    let audited: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'schedule.update'")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(audited, 1);
+    let (status, err) = start(&st, &admin).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(err["error"].as_str().unwrap().contains("oknem"), "{err}");
+
+    // po restarcie (nowa usługa z plikiem bez okien) harmonogram wraca z bazy
+    let st2 = st.with_scans(service(Ok(cfg()), FakeRunner::default()));
+    assert!(st2.scans.schedule().windows.is_empty());
+    crate::scans::load_saved_schedule(&st2).await;
+    assert_eq!(serde_json::to_value(st2.scans.schedule()).unwrap(), night);
+}

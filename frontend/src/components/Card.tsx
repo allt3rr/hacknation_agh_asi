@@ -11,11 +11,12 @@ interface CardProps {
 export function Card({ title, actions, children, headingRef }: CardProps) {
   const headingId = useId();
   return (
-    <section className="mb-4 rounded-[10px] border border-line bg-surface p-4" aria-labelledby={title ? headingId : undefined}>
+    <section className="glass animate-rise mb-5 p-5" aria-labelledby={title ? headingId : undefined}>
       {(title || actions) && (
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           {title && (
-            <h2 id={headingId} ref={headingRef} tabIndex={headingRef ? -1 : undefined} className="text-[1.17em] font-bold outline-none">
+            <h2 id={headingId} ref={headingRef} tabIndex={headingRef ? -1 : undefined} className="flex items-center gap-2 text-base font-semibold outline-none">
+              <span aria-hidden="true" className="brand-gradient h-4 w-1 rounded-full" />
               {title}
             </h2>
           )}

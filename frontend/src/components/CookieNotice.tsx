@@ -45,7 +45,7 @@ export function CookieNotice() {
     >
       <p className="m-0 min-w-0 flex-1 basis-64 break-words">
         Ta aplikacja używa wyłącznie niezbędnego ciasteczka sesji <code>asi_session</code>, aby utrzymać
-        zalogowanie ({hours ? `ważne do ${hours} godzin lub do wylogowania` : "do wylogowania lub wygaśnięcia sesji"}). Nie używamy ciasteczek
+        zalogowanie ({hours ? `do wylogowania, najdłużej ${hours} godz.` : "do wylogowania lub wygaśnięcia sesji"}). Nie używamy ciasteczek
         analitycznych ani marketingowych.
       </p>
       <button type="button" onClick={dismiss}>

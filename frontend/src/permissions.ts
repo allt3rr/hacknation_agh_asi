@@ -8,6 +8,7 @@ export type Permission =
   | "export"
   | "data.update"
   | "scans.run"
+  | "scans.configure"
   | "targets.create"
   | "targets.update"
   | "targets.delete"

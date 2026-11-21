@@ -7,6 +7,7 @@ pub mod results;
 mod results_tests;
 pub mod rules;
 pub mod runs;
+pub mod schedule;
 pub mod sessions;
 pub mod targets;
 pub mod users;
@@ -125,6 +126,7 @@ mod tests {
             "rules",
             "scan_chunks",
             "scan_runs",
+            "scan_schedule",
             "services",
             "sessions",
             "targets",

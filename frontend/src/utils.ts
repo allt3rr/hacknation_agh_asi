@@ -1,7 +1,7 @@
 import type { Coverage, FileFormat, RunStatus } from "./types";
 
 /** Klasy przycisku drugorzędnego (obramowany, bez tła). */
-export const BTN_SECONDARY = "border border-line bg-transparent px-2.5 py-1 text-fg";
+export const BTN_SECONDARY = "border border-line bg-surface px-2.5 py-1 text-fg shadow-none hover:border-accent hover:text-accent";
 
 export const STATUS_LABELS: Record<RunStatus, string> = {
   queued: "w kolejce",
@@ -64,4 +64,4 @@ export function coverageText(c: Coverage): string {
     .join(", ");
 }
 
-export const BADGE = "mr-1 my-px inline-block rounded-full border border-line bg-bg px-2 py-px text-xs";
+export const BADGE = "mr-1 my-px inline-flex items-center rounded-full border border-accent/25 bg-accent/10 px-2 py-px text-xs font-medium text-fg";

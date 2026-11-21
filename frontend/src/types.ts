@@ -153,4 +153,19 @@ export interface User {
   created_at: string;
 }
 
+export interface ScheduleWindow {
+  /** HH:MM, czas serwera */
+  start: string;
+  end: string;
+  /** mon..sun; pusta lista = codziennie */
+  days: string[];
+}
+
+/** Harmonogram automatycznych skanów (`GET/PUT /api/v1/schedule`). */
+export interface Schedule {
+  enabled: boolean;
+  every_hours: number;
+  windows: ScheduleWindow[];
+}
+
 export type FileFormat = "csv" | "json" | "text";
