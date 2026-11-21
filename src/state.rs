@@ -1,9 +1,7 @@
-use crate::auth::Session;
 use crate::config::Config;
 use crate::db::{self, crypto::FieldCrypto, Db};
 use crate::fingerprint::SignatureSet;
 use anyhow::{Context, Result};
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -13,7 +11,6 @@ pub struct AppState {
     pub cfg: Arc<Config>,
     pub db: Db,
     pub crypto: Arc<FieldCrypto>,
-    pub sessions: Arc<RwLock<HashMap<String, Session>>>,
     pub signatures: Arc<RwLock<SignatureSet>>,
     /// tylko jeden skan/import naraz
     pub scan_lock: Arc<Mutex<()>>,
@@ -28,13 +25,27 @@ impl AppState {
             cfg: Arc::new(cfg),
             db,
             crypto: Arc::new(crypto),
-            sessions: Arc::default(),
             signatures: Arc::new(RwLock::new(SignatureSet::default())),
             scan_lock: Arc::new(Mutex::new(())),
         };
         let n = st.reload_signatures().await?;
         tracing::info!("Załadowano {n} sygnatur");
         Ok(st)
+    }
+
+    /// Stan do testów API: konfiguracja z `config/asi.toml`, podana baza, losowy klucz, bez sygnatur.
+    #[cfg(test)]
+    pub fn for_tests(db: Db, edit: impl FnOnce(&mut Config)) -> Self {
+        let mut cfg: Config = toml::from_str(include_str!("../config/asi.toml")).expect("config/asi.toml");
+        edit(&mut cfg);
+        let crypto = FieldCrypto::from_base64_key(&FieldCrypto::generate_key()).expect("klucz");
+        Self {
+            cfg: Arc::new(cfg),
+            db,
+            crypto: Arc::new(crypto),
+            signatures: Arc::new(RwLock::new(SignatureSet::default())),
+            scan_lock: Arc::new(Mutex::new(())),
+        }
     }
 
     /// Wbudowane sygnatury z katalogu + własne z bazy (własne nadpisują wbudowane o tym samym id).

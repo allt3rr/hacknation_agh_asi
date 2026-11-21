@@ -59,6 +59,7 @@ async fn update_user(
 ) -> ApiResult<StatusCode> {
     user.require(Permission::ManageUsers)?;
 
+    let password_changed = req.password.is_some();
     let password_hash = match req.password {
         Some(password) => {
             validate_password(&password)?;
@@ -70,8 +71,10 @@ async fn update_user(
         return Err(ApiError::NotFound);
     }
 
-    // Zmiana roli lub hasła kończy aktywne sesje tego użytkownika.
-    end_sessions_of(&st, &id).await;
+    // Zmiana hasła kończy aktywne sesje. Zmiana roli działa od razu bez wylogowania (rola czytana z bazy).
+    if password_changed {
+        db::delete_user_sessions(&st.db, &id).await?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -80,10 +83,10 @@ async fn delete_user(State(st): State<AppState>, user: AuthUser, Path(id): Path<
     if id == user.user_id {
         return Err(ApiError::bad_request("Nie można usunąć własnego konta"));
     }
+    // Sesje usuwa `ON DELETE CASCADE`.
     if !db::delete_user(&st.db, &id).await? {
         return Err(ApiError::NotFound);
     }
-    end_sessions_of(&st, &id).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -94,8 +97,4 @@ fn validate_password(password: &str) -> ApiResult<()> {
         )));
     }
     Ok(())
-}
-
-async fn end_sessions_of(st: &AppState, user_id: &str) {
-    st.sessions.write().await.retain(|_, session| session.user_id != user_id);
 }

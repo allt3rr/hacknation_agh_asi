@@ -8,6 +8,7 @@ mod changes;
 mod hosts;
 mod observations;
 mod runs;
+mod sessions;
 mod signatures;
 mod targets;
 mod users;
@@ -17,6 +18,7 @@ pub use changes::*;
 pub use hosts::*;
 pub use observations::*;
 pub use runs::*;
+pub use sessions::*;
 pub use signatures::*;
 pub use targets::*;
 pub use users::*;
@@ -43,6 +45,15 @@ pub async fn connect(url: &str) -> Result<Db> {
 
     sqlx::migrate!("./migrations").run(&pool).await?;
     mark_interrupted_runs(&pool).await?;
+    Ok(pool)
+}
+
+/// Baza w pamięci dla testów. Jedno połączenie, bo każde połączenie `:memory:` to osobna baza.
+#[cfg(test)]
+pub async fn connect_memory() -> Result<Db> {
+    let options = SqliteConnectOptions::new().in_memory(true).foreign_keys(true);
+    let pool = SqlitePoolOptions::new().max_connections(1).connect_with(options).await?;
+    sqlx::migrate!("./migrations").run(&pool).await?;
     Ok(pool)
 }
 

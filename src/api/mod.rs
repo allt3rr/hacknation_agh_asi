@@ -10,6 +10,9 @@ mod signatures;
 mod targets;
 mod users;
 
+#[cfg(test)]
+mod tests;
+
 pub use error::{ApiError, ApiResult};
 
 use crate::state::AppState;
