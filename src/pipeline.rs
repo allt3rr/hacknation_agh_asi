@@ -8,6 +8,7 @@
 //! Import wyników z pliku korzysta z tych samych kroków zapisu i porównania (`ingest`).
 
 use crate::db;
+use crate::defectdojo;
 use crate::diff::{self, Change};
 use crate::input;
 use crate::model::Observation;
@@ -21,6 +22,8 @@ use tokio::time::Instant;
 struct ScanOutcome {
     stats: Value,
     pending: Vec<String>,
+    observations: Vec<Observation>,
+    changes: Vec<Change>,
 }
 
 pub async fn execute_scan(st: &AppState, deadline: Option<Instant>, source: &str) -> Result<String> {
@@ -34,11 +37,18 @@ pub async fn execute_scan(st: &AppState, deadline: Option<Instant>, source: &str
     let duration = started.elapsed().as_secs_f64();
 
     match outcome {
-        Ok(ScanOutcome { mut stats, pending }) => {
+        Ok(ScanOutcome { mut stats, pending, observations, changes }) => {
             let status = if pending.is_empty() { "completed" } else { "partial" };
             stats["duration_secs"] = json!(duration);
             db::finish_run(&st.db, &run_id, status, duration, &stats, &pending).await?;
             tracing::info!(%run_id, status, duration_secs = duration, "skan zakończony");
+            if let Some(dd) = &st.cfg.defectdojo {
+                // błąd wysyłki nie psuje skanu; można ponowić przyciskiem na stronie Skany
+                match defectdojo::push(dd, &run_id, &observations, &changes).await {
+                    Ok(_) => tracing::info!(%run_id, "wysłano do DefectDojo"),
+                    Err(error) => tracing::warn!(%run_id, %error, "wysyłka do DefectDojo nieudana"),
+                }
+            }
             Ok(run_id)
         }
         Err(error) => {
@@ -136,7 +146,7 @@ async fn scan_and_ingest(
         "changes": changes.len(),
         "chunks": report.chunks,
     });
-    Ok(ScanOutcome { stats, pending: report.pending })
+    Ok(ScanOutcome { stats, pending: report.pending, observations: report.observations, changes })
 }
 
 /// Hosty, które powinny żyć, a nie odpowiedziały, skanujemy drugi raz.
