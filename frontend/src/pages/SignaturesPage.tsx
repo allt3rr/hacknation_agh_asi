@@ -5,8 +5,8 @@ import { DataTable } from "../components/DataTable";
 import { NoticeBar } from "../components/NoticeBar";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
-import type { CustomSignature, Role } from "../types";
-import { BTN_SECONDARY, formatDate } from "../utils";
+import type { Session, SignatureList } from "../types";
+import { BADGE, BTN_SECONDARY, formatDate } from "../utils";
 
 const EXAMPLE_SIGNATURE = `- id: moja-aplikacja
   name: Moja aplikacja
@@ -19,23 +19,38 @@ const EXAMPLE_SIGNATURE = `- id: moja-aplikacja
     - type: title
       regex: 'Moja Aplikacja'`;
 
-export function SignaturesPage({ role }: { role: Role }) {
+type Custom = SignatureList["custom"][number];
+
+export function SignaturesPage({ session }: { session: Session }) {
   const { data, error, reload } = useApiData(api.signatures.list);
   const { notice, info, run } = useNotice();
   const [yaml, setYaml] = useState(EXAMPLE_SIGNATURE);
-  const canManage = can(role, "signatures");
+  // slug edytowanej sygnatury (PUT = nowa wersja) albo null przy dodawaniu
+  const [editing, setEditing] = useState<string | null>(null);
+  const canWrite = editing ? can(session, "signatures.update") : can(session, "signatures.create");
 
   const save = () =>
     run(async () => {
-      const result = await api.signatures.add(yaml);
-      info(`Zapisano. Aktywnych sygnatur: ${result.active_signatures}`);
+      if (editing) {
+        await api.signatures.update(editing, yaml);
+        info(`Zapisano nową wersję sygnatury ${editing}`);
+      } else {
+        const res = await api.signatures.add(yaml);
+        info(`Dodano: ${res.created.join(", ")}`);
+      }
+      setEditing(null);
       await reload();
     });
 
-  const remove = (signature: CustomSignature) =>
+  const edit = (s: Custom) => {
+    setEditing(s.slug);
+    setYaml(s.yaml);
+  };
+
+  const disable = (s: Custom) =>
     run(async () => {
-      if (!confirm(`Usunąć sygnaturę ${signature.name}?`)) return;
-      await api.signatures.remove(signature.id);
+      if (!confirm(`Wyłączyć sygnaturę ${s.slug}?`)) return;
+      await api.signatures.disable(s.slug);
       await reload();
     });
 
@@ -44,11 +59,19 @@ export function SignaturesPage({ role }: { role: Role }) {
       <NoticeBar notice={notice} />
       {error && <p className="my-3.5 text-red">{error}</p>}
 
-      {canManage && (
-        <Card title="Dodaj własną sygnaturę (YAML)">
-          <textarea className="min-h-[110px] w-full font-mono" rows={12} value={yaml} onChange={(e) => setYaml(e.target.value)} />
+      {(can(session, "signatures.create") || editing) && (
+        <Card title={editing ? `Edycja sygnatury ${editing}` : "Dodaj własną sygnaturę (YAML)"}>
+          <textarea aria-label="YAML sygnatury" className="min-h-[110px] w-full font-mono" rows={12} value={yaml} onChange={(e) => setYaml(e.target.value)} />
           <div className="my-2 flex flex-wrap items-center gap-2">
-            <button onClick={save}>Zapisz</button>
+            <button onClick={save} disabled={!canWrite}>
+              Zapisz
+            </button>
+            {editing && (
+              <button className={BTN_SECONDARY} onClick={() => { setEditing(null); setYaml(EXAMPLE_SIGNATURE); }}>
+                Anuluj edycję
+              </button>
+            )}
+            <span className="text-muted">Ścieżki reguł `path` muszą zaczynać się od „/” (bez innego hosta).</span>
           </div>
         </Card>
       )}
@@ -56,34 +79,41 @@ export function SignaturesPage({ role }: { role: Role }) {
       <Card title="Własne sygnatury">
         <DataTable
           rows={data?.custom ?? []}
-          rowKey={(s) => s.id}
+          rowKey={(s) => s.slug}
           columns={[
-            { header: "Nazwa", render: (s) => s.name },
-            { header: "Autor", render: (s) => s.created_by },
-            { header: "Dodano", render: (s) => formatDate(s.created_at) },
+            { header: "ID", render: (s) => s.slug },
+            { header: "Wersja", render: (s) => s.version },
+            { header: "Stan", render: (s) => (s.enabled ? "aktywna" : "wyłączona") },
+            { header: "Zmieniono", render: (s) => formatDate(s.created_at) },
             {
               header: "",
-              render: (s) =>
-                canManage && (
-                  <button className={BTN_SECONDARY} onClick={() => remove(s)}>
-                    Usuń
-                  </button>
-                ),
+              render: (s) => (
+                <div className="flex gap-1">
+                  {can(session, "signatures.update") && (
+                    <button className={BTN_SECONDARY} onClick={() => edit(s)}>
+                      Edytuj
+                    </button>
+                  )}
+                  {can(session, "signatures.delete") && s.enabled && (
+                    <button className={BTN_SECONDARY} onClick={() => disable(s)}>
+                      Wyłącz
+                    </button>
+                  )}
+                </div>
+              ),
             },
           ]}
         />
       </Card>
 
-      <Card title="Aktywne sygnatury">
+      <Card title={`Wbudowane sygnatury (${data?.builtin.length ?? 0})`}>
         <DataTable
-          rows={data?.active ?? []}
+          rows={data?.builtin ?? []}
           rowKey={(s) => s.id}
           columns={[
             { header: "ID", render: (s) => s.id },
             { header: "Nazwa", render: (s) => s.name },
-            { header: "Kategoria", render: (s) => <span className="mr-1 my-px inline-block rounded-full border border-line bg-bg px-2 py-px text-xs">{s.category}</span> },
-            { header: "Pewność", render: (s) => `${s.confidence}%` },
-            { header: "Reguły", render: (s) => s.rules.map((rule) => rule.type).join(", ") },
+            { header: "Kategoria", render: (s) => <span className={BADGE}>{s.category}</span> },
           ]}
         />
       </Card>

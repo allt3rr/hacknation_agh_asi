@@ -1,19 +1,25 @@
-// Uprawnienia ról po stronie interfejsu. Służą tylko do ukrywania przycisków;
-// właściwa kontrola dostępu odbywa się w backendzie (src/auth.rs).
+// Uprawnienia w interfejsie pochodzą z profilu `/api/v1/me` (kody z backend/crates/asi-core/src/rbac.rs).
+// Służą tylko do ukrywania przycisków; dostęp egzekwuje backend (403).
 
-import type { Role } from "./types";
+import type { Role, Session } from "./types";
 
-export type Permission = "create" | "modify" | "delete" | "scan" | "signatures" | "users";
+export type Permission =
+  | "read"
+  | "export"
+  | "data.update"
+  | "scans.run"
+  | "targets.create"
+  | "targets.update"
+  | "targets.delete"
+  | "signatures.create"
+  | "signatures.update"
+  | "signatures.delete"
+  | "integrations.export"
+  | "admin.users"
+  | "admin.audit";
 
-const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-  admin: ["create", "modify", "delete", "scan", "signatures", "users"],
-  editor: ["create", "modify", "delete", "scan", "signatures"],
-  analyst: ["modify"],
-  viewer: [],
-};
-
-export function can(role: Role, permission: Permission): boolean {
-  return ROLE_PERMISSIONS[role].includes(permission);
+export function can(session: Session, permission: Permission): boolean {
+  return session.permissions.includes(permission);
 }
 
 export const ROLES: Role[] = ["viewer", "analyst", "editor", "admin"];

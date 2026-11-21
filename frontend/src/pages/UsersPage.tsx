@@ -12,12 +12,17 @@ export function UsersPage() {
   const { data: users, error, reload } = useApiData(api.users.list);
   const { notice, info, run } = useNotice();
 
-  const changeRole = (user: User, role: Role) =>
+  const update = (user: User, patch: { role?: Role; password?: string; disabled?: boolean }, message: string) =>
     run(async () => {
-      await api.users.changeRole(user.id, role);
-      info(`Zmieniono rolę użytkownika ${user.username}`);
+      await api.users.update(user.id, patch);
+      info(message);
       await reload();
     });
+
+  const resetPassword = (user: User) => {
+    const password = prompt(`Nowe hasło dla ${user.username} (min. 10 znaków). Aktywne sesje zostaną zakończone.`);
+    if (password) update(user, { password }, `Zmieniono hasło użytkownika ${user.username}`);
+  };
 
   const remove = (user: User) =>
     run(async () => {
@@ -52,20 +57,42 @@ export function UsersPage() {
             {
               header: "Rola",
               render: (u) => (
-                <select value={u.role} onChange={(e) => changeRole(u, e.target.value as Role)}>
+                <select
+                  aria-label={`Rola ${u.username}`}
+                  value={u.roles[0] ?? "viewer"}
+                  onChange={(e) => update(u, { role: e.target.value as Role }, `Zmieniono rolę użytkownika ${u.username}`)}
+                >
                   {ROLES.map((role) => (
                     <option key={role}>{role}</option>
                   ))}
                 </select>
               ),
             },
+            {
+              header: "Aktywne",
+              render: (u) => (
+                <input
+                  type="checkbox"
+                  aria-label={`Konto ${u.username} aktywne`}
+                  checked={!u.disabled}
+                  onChange={(e) =>
+                    update(u, { disabled: !e.target.checked }, e.target.checked ? `Odblokowano ${u.username}` : `Zablokowano ${u.username}`)
+                  }
+                />
+              ),
+            },
             { header: "Utworzono", render: (u) => formatDate(u.created_at) },
             {
               header: "",
               render: (u) => (
-                <button className={BTN_SECONDARY} onClick={() => remove(u)}>
-                  Usuń
-                </button>
+                <div className="flex gap-1">
+                  <button className={BTN_SECONDARY} onClick={() => resetPassword(u)}>
+                    Reset hasła
+                  </button>
+                  <button className={BTN_SECONDARY} onClick={() => remove(u)}>
+                    Usuń
+                  </button>
+                </div>
               ),
             },
           ]}
@@ -75,11 +102,7 @@ export function UsersPage() {
   );
 }
 
-interface NewUserFormProps {
-  onCreate: (username: string, password: string, role: Role) => Promise<void>;
-}
-
-function NewUserForm({ onCreate }: NewUserFormProps) {
+function NewUserForm({ onCreate }: { onCreate: (username: string, password: string, role: Role) => Promise<void> }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("viewer");
@@ -93,20 +116,21 @@ function NewUserForm({ onCreate }: NewUserFormProps) {
 
   return (
     <form className="my-2 flex flex-wrap items-center gap-2" onSubmit={handleSubmit}>
-      <input placeholder="login" value={username} onChange={(e) => setUsername(e.target.value)} />
+      <input aria-label="Login" placeholder="login" value={username} onChange={(e) => setUsername(e.target.value)} />
       <input
+        aria-label="Hasło"
         placeholder="hasło (min. 10 znaków)"
         type="password"
         autoComplete="new-password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
-      <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
+      <select aria-label="Rola" value={role} onChange={(e) => setRole(e.target.value as Role)}>
         {ROLES.map((r) => (
           <option key={r}>{r}</option>
         ))}
       </select>
-      <button type="submit" disabled={!username || !password}>
+      <button type="submit" disabled={!username || password.length < 10}>
         Dodaj
       </button>
     </form>

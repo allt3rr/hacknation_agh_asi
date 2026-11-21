@@ -1,21 +1,23 @@
-// Typy odpowiedzi API. Odpowiadają strukturom z backendu (src/model.rs, src/db, src/diff.rs).
+// Typy odpowiedzi API v1. Odpowiadają strukturom z backend/ (asi-db, asi-core::export).
 
 export type Role = "admin" | "editor" | "analyst" | "viewer";
 
+/** Profil z `GET /api/v1/me` i logowania. */
 export interface Session {
-  token: string;
+  id: string;
   username: string;
-  role: Role;
+  roles: Role[];
+  permissions: string[];
 }
 
 export interface Target {
   id: string;
-  value: string;
   kind: "ip" | "cidr" | "domain";
+  value: string;
+  source: string;
+  excluded: boolean;
   tags: string[];
   note: string | null;
-  enabled: boolean;
-  source: string;
   created_at: string;
   updated_at: string;
 }
@@ -23,44 +25,56 @@ export interface Target {
 export interface TargetPatch {
   tags?: string[];
   note?: string;
-  enabled?: boolean;
+  excluded?: boolean;
 }
 
 export interface ImportSummary {
-  parsed: number;
-  inserted: number;
-  invalid: string[];
+  rows: number;
+  accepted: number;
+  duplicates: number;
+  rejected: { row: number; value: string }[];
+  dry_run: boolean;
 }
 
-export type RunStatus = "running" | "completed" | "partial" | "aborted" | "failed";
+export type RunStatus = "queued" | "running" | "done" | "partial" | "failed" | "cancelled";
+
+export interface Coverage {
+  planned?: number;
+  scanned?: number;
+  pending?: number;
+  failed?: number;
+  live_hosts?: number;
+  services?: number;
+  http_probed?: number;
+}
 
 export interface Run {
   id: string;
-  source: string;
+  kind: "scan" | "import";
   status: RunStatus;
-  started_at: string;
+  reason: string | null;
+  coverage: Coverage;
+  started_at: string | null;
   finished_at: string | null;
-  duration_secs: number | null;
-  stats_json: string | null;
-}
-
-export interface RunStats {
-  live_hosts?: number;
-  services?: number;
-  changes?: number;
-  pending?: number;
-  failed?: number;
+  duration_ms: number | null;
+  created_at: string;
 }
 
 export type ChangeKind = "new" | "gone" | "changed" | "host_inactive" | "host_returned";
 
 export interface Change {
+  id: number;
   kind: ChangeKind;
-  key: string;
+  entity_key: string;
   ip: string;
   field: string | null;
   before: string | null;
   after: string | null;
+}
+
+export interface Page<T> {
+  total: number;
+  items: T[];
 }
 
 export interface Detection {
@@ -72,17 +86,20 @@ export interface Detection {
   evidence: string[];
 }
 
-export interface HttpInfo {
-  url: string;
-  final_url: string;
+export interface HttpView {
   status: number;
   title: string | null;
-  headers: Record<string, string>;
-  cookies: string[];
+  final_url: string;
   redirects: string[];
+  blocked_redirects: string[];
+  headers: Record<string, string>;
+  cookies: { name: string; attributes: string[] }[];
 }
 
-export interface Observation {
+/** Wynik po korektach analityka; surowy pomiar w `raw_*`. */
+export interface ResultRow {
+  id: string;
+  key: string;
   ip: string;
   hostname: string | null;
   port: number;
@@ -91,62 +108,40 @@ export interface Observation {
   service: string | null;
   product: string | null;
   version: string | null;
-  http: HttpInfo | null;
-  detections: Detection[];
-}
-
-export interface NotableFinding {
-  key: string;
-  name: string;
-  category: string;
-  confidence: number;
-  title: string | null;
+  http: HttpView | null;
+  technologies: Detection[];
+  status: string | null;
+  severity: string | null;
+  owner: string | null;
+  note: string | null;
+  raw_service: string | null;
+  raw_product: string | null;
+  raw_version: string | null;
 }
 
 export interface Dashboard {
-  counts: {
-    targets: number;
-    hosts: Partial<Record<"active" | "unstable" | "inactive", number>>;
-  };
+  targets: number;
+  assets: Partial<Record<"active" | "unstable" | "inactive", number>>;
   latest_run: Run | null;
-  services: number;
-  technologies: [string, number][];
-  interesting: NotableFinding[];
-  changes: Change[];
   scan_running: boolean;
-}
-
-export interface SignatureRule {
-  type: string;
-}
-
-export interface Signature {
-  id: string;
-  name: string;
-  category: string;
-  confidence: number;
-  rules: SignatureRule[];
-}
-
-export interface CustomSignature {
-  id: string;
-  name: string;
-  yaml: string;
-  enabled: number;
-  created_by: string;
-  created_at: string;
+  services: number;
+  changes_total: number;
+  technologies: { name: string; category: string; services: number }[];
+  notable: { ip: string; port: number; name: string; category: string; title: string | null; confidence: number }[];
+  recent_changes: Change[];
 }
 
 export interface SignatureList {
-  active: Signature[];
-  custom: CustomSignature[];
+  builtin: { id: string; name: string; category: string }[];
+  custom: { slug: string; version: number; yaml: string; enabled: boolean; created_at: string }[];
 }
 
 export interface User {
   id: string;
   username: string;
-  role: Role;
+  disabled: boolean;
+  roles: Role[];
   created_at: string;
 }
 
-export type FileFormat = "csv" | "json" | "txt";
+export type FileFormat = "csv" | "json" | "text";

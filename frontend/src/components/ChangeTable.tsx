@@ -19,7 +19,7 @@ const KIND_COLORS: Record<ChangeKind, string> = {
 
 const COLUMNS: Column<Change>[] = [
   { header: "Typ", render: (c) => <span className={KIND_COLORS[c.kind]}>{KIND_LABELS[c.kind]}</span> },
-  { header: "Usługa / host", render: (c) => c.key },
+  { header: "Usługa / host", render: (c) => c.entity_key },
   { header: "Pole", render: (c) => c.field ?? "" },
   { header: "Przed", render: (c) => c.before ?? "" },
   { header: "Po", render: (c) => c.after ?? "" },
@@ -30,7 +30,7 @@ export function ChangeTable({ changes }: { changes: Change[] }) {
     <DataTable
       columns={COLUMNS}
       rows={changes}
-      rowKey={(c, i) => `${c.key}-${c.kind}-${c.field ?? ""}-${i}`}
+      rowKey={(c, i) => `${c.id ?? i}-${c.entity_key}-${c.kind}`}
       emptyText="Brak zmian"
     />
   );

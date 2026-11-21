@@ -4,8 +4,8 @@ import { ChangeTable } from "../components/ChangeTable";
 import { DataTable } from "../components/DataTable";
 import { StatCard } from "../components/StatCard";
 import { useApiData } from "../hooks";
-import type { Dashboard, NotableFinding } from "../types";
-import { BTN_SECONDARY, formatDate } from "../utils";
+import type { Dashboard } from "../types";
+import { BADGE, BTN_SECONDARY, formatDate } from "../utils";
 
 export function DashboardPage() {
   const { data, error, reload } = useApiData(api.dashboard);
@@ -24,60 +24,54 @@ export function DashboardPage() {
       </Card>
 
       <Card title="Najważniejsze znaleziska">
-        <NotableFindings findings={data.interesting} />
+        <DataTable
+          columns={[
+            { header: "Usługa", render: (f) => `${f.ip}:${f.port}` },
+            { header: "Znalezisko", render: (f) => f.name },
+            { header: "Kategoria", render: (f) => <span className={BADGE}>{f.category}</span> },
+            { header: "Pewność", render: (f) => `${f.confidence}%` },
+            { header: "Tytuł strony", render: (f) => f.title ?? "" },
+          ]}
+          rows={data.notable}
+          rowKey={(f) => `${f.ip}:${f.port}-${f.name}`}
+          emptyText="Brak znalezisk"
+        />
       </Card>
 
-      <Card title="Zmiany w ostatnim skanie">
-        <ChangeTable changes={data.changes} />
+      <Card title={`Zmiany w ostatnim przebiegu (${data.changes_total})`}>
+        <ChangeTable changes={data.recent_changes} />
+        {data.changes_total > data.recent_changes.length && (
+          <p className="my-2 text-muted">Pokazano {data.recent_changes.length} z {data.changes_total}. Wszystkie: zakładka Skany → Zmiany.</p>
+        )}
       </Card>
 
       <Card title="Technologie">
         <DataTable
           columns={[
-            { header: "Technologia", render: ([name]) => name },
-            { header: "Liczba usług", render: ([, count]) => count },
+            { header: "Technologia", render: (t) => t.name },
+            { header: "Kategoria", render: (t) => <span className={BADGE}>{t.category}</span> },
+            { header: "Liczba usług", render: (t) => t.services },
           ]}
           rows={data.technologies}
-          rowKey={([name]) => name}
+          rowKey={(t) => `${t.name}-${t.category}`}
         />
       </Card>
     </>
   );
 }
 
-function Stats({ dashboard }: { dashboard: Dashboard }) {
-  const { counts, latest_run: run } = dashboard;
+function Stats({ dashboard: d }: { dashboard: Dashboard }) {
+  const run = d.latest_run;
   return (
     <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
-      <StatCard label="Cele" value={counts.targets} />
-      <StatCard label="Hosty aktywne" value={counts.hosts.active ?? 0} />
-      <StatCard label="Hosty niestabilne" value={counts.hosts.unstable ?? 0} />
-      <StatCard label="Hosty nieaktywne" value={counts.hosts.inactive ?? 0} />
-      <StatCard label="Usługi" value={dashboard.services} />
-      <StatCard label="Zmiany" value={dashboard.changes.length} />
-      <StatCard
-        label="Ostatni skan"
-        value={run ? run.status : "brak"}
-        hint={run ? formatDate(run.started_at) : undefined}
-      />
-      <StatCard label="Skan w toku" value={dashboard.scan_running ? "tak" : "nie"} />
+      <StatCard label="Cele" value={d.targets} />
+      <StatCard label="Hosty aktywne" value={d.assets.active ?? 0} />
+      <StatCard label="Hosty niestabilne" value={d.assets.unstable ?? 0} />
+      <StatCard label="Hosty nieaktywne" value={d.assets.inactive ?? 0} />
+      <StatCard label="Usługi" value={d.services} />
+      <StatCard label="Zmiany" value={d.changes_total} />
+      <StatCard label="Ostatni przebieg" value={run ? run.status : "brak"} hint={run ? formatDate(run.started_at ?? run.created_at) : undefined} />
+      <StatCard label="Skan w toku" value={d.scan_running ? "tak" : "nie"} />
     </div>
-  );
-}
-
-function NotableFindings({ findings }: { findings: NotableFinding[] }) {
-  return (
-    <DataTable
-      columns={[
-        { header: "Usługa", render: (f) => f.key },
-        { header: "Znalezisko", render: (f) => f.name },
-        { header: "Kategoria", render: (f) => <span className="mr-1 my-px inline-block rounded-full border border-line bg-bg px-2 py-px text-xs">{f.category}</span> },
-        { header: "Pewność", render: (f) => `${f.confidence}%` },
-        { header: "Tytuł strony", render: (f) => f.title ?? "" },
-      ]}
-      rows={findings}
-      rowKey={(f) => `${f.key}-${f.name}`}
-      emptyText="Brak znalezisk"
-    />
   );
 }

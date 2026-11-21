@@ -6,20 +6,24 @@ import { FilePicker } from "../components/FilePicker";
 import { NoticeBar } from "../components/NoticeBar";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
-import type { ImportSummary, Role, Target, TargetPatch } from "../types";
+import type { ImportSummary, Session, Target, TargetPatch } from "../types";
 import { BTN_SECONDARY, fileFormat } from "../utils";
 
 const PLACEHOLDER = "10.0.0.0/24\n192.168.1.10\nintranet.example.pl";
 
-function summaryText(summary: ImportSummary): string {
-  const rejected = summary.invalid.length ? `, odrzucono: ${summary.invalid.join(", ")}` : "";
-  return `Dodano ${summary.inserted} z ${summary.parsed}${rejected}`;
+function summaryText(s: ImportSummary): string {
+  const rejected = s.rejected.length
+    ? `, odrzucono ${s.rejected.length}: ${s.rejected.slice(0, 10).map((r) => `${r.value} (wiersz ${r.row})`).join(", ")}`
+    : "";
+  const prefix = s.dry_run ? "Podgląd: zostałoby dodanych" : "Dodano";
+  return `${prefix} ${s.accepted} (wierszy: ${s.rows}, duplikatów: ${s.duplicates}${rejected})`;
 }
 
-export function TargetsPage({ role }: { role: Role }) {
+export function TargetsPage({ session }: { session: Session }) {
   const { data: targets, error, reload } = useApiData(api.targets.list);
   const { notice, info, run } = useNotice();
   const [text, setText] = useState("");
+  const [dryRun, setDryRun] = useState(false);
 
   const addManually = () =>
     run(async () => {
@@ -30,7 +34,7 @@ export function TargetsPage({ role }: { role: Role }) {
 
   const importFile = (file: File) =>
     run(async () => {
-      info(summaryText(await api.targets.importFile(fileFormat(file.name), await file.text())));
+      info(summaryText(await api.targets.importFile(fileFormat(file.name), await file.text(), dryRun)));
       await reload();
     });
 
@@ -38,22 +42,25 @@ export function TargetsPage({ role }: { role: Role }) {
     <>
       <NoticeBar notice={notice} />
 
-      {can(role, "create") && (
+      {can(session, "targets.create") && (
         <Card title="Dodaj cele">
           <textarea className="min-h-[110px] w-full" placeholder={PLACEHOLDER} value={text} onChange={(e) => setText(e.target.value)} />
           <div className="my-2 flex flex-wrap items-center gap-2">
             <button onClick={addManually} disabled={!text.trim()}>
               Dodaj ręcznie
             </button>
-            <span className="text-muted">lub plik CSV (target,tags,note), JSON albo TXT:</span>
+            <span className="text-muted">lub plik CSV (target,tags,note albo format organizatora z ip_address), JSON, TXT:</span>
             <FilePicker accept=".csv,.json,.txt" buttonLabel="Importuj plik" onSubmit={importFile} />
+            <label className="text-muted">
+              <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} /> tylko podgląd
+            </label>
           </div>
         </Card>
       )}
 
-      <Card title="Lista celów">
+      <Card title={`Lista celów (${targets?.length ?? 0})`}>
         {error && <p className="my-3.5 text-red">{error}</p>}
-        <TargetTable targets={targets ?? []} role={role} onChanged={reload} run={run} />
+        <TargetTable targets={targets ?? []} session={session} onChanged={reload} run={run} />
       </Card>
     </>
   );
@@ -61,14 +68,13 @@ export function TargetsPage({ role }: { role: Role }) {
 
 interface TargetTableProps {
   targets: Target[];
-  role: Role;
+  session: Session;
   onChanged: () => Promise<void>;
-  /** Wykonuje akcję i pokazuje ewentualny błąd (z useNotice). */
   run: (action: () => Promise<void>) => Promise<void>;
 }
 
-function TargetTable({ targets, role, onChanged, run }: TargetTableProps) {
-  const editable = can(role, "modify");
+function TargetTable({ targets, session, onChanged, run }: TargetTableProps) {
+  const editable = can(session, "targets.update");
 
   const update = (target: Target, patch: TargetPatch) =>
     run(async () => {
@@ -104,24 +110,24 @@ function TargetTable({ targets, role, onChanged, run }: TargetTableProps) {
         },
         {
           header: "Notatka",
-          render: (t) =>
-            editable ? <EditableText value={t.note ?? ""} onSave={(note) => update(t, { note })} /> : t.note,
+          render: (t) => (editable ? <EditableText value={t.note ?? ""} onSave={(note) => update(t, { note })} /> : t.note),
         },
         {
           header: "Skanowany",
           render: (t) => (
             <input
               type="checkbox"
-              checked={t.enabled}
+              aria-label={`Skanuj ${t.value}`}
+              checked={!t.excluded}
               disabled={!editable}
-              onChange={(e) => update(t, { enabled: e.target.checked })}
+              onChange={(e) => update(t, { excluded: !e.target.checked })}
             />
           ),
         },
         {
           header: "",
           render: (t) =>
-            can(role, "delete") && (
+            can(session, "targets.delete") && (
               <button className={BTN_SECONDARY} onClick={() => remove(t)}>
                 Usuń
               </button>
@@ -133,13 +139,7 @@ function TargetTable({ targets, role, onChanged, run }: TargetTableProps) {
 }
 
 /** Pole tekstowe zapisywane po opuszczeniu (blur), tylko jeśli wartość się zmieniła. */
-function EditableText({ value, onSave }: { value: string; onSave: (value: string) => void }) {
+export function EditableText({ value, onSave, label }: { value: string; onSave: (value: string) => void; label?: string }) {
   const [draft, setDraft] = useState(value);
-  return (
-    <input
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => draft !== value && onSave(draft)}
-    />
-  );
+  return <input aria-label={label} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => draft !== value && onSave(draft)} />;
 }
