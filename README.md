@@ -1,168 +1,128 @@
 # ASI: Attack Surface Intelligence
 
-Prototyp narzędzia do cyklicznego discovery scanu dużych sieci (powyżej 10 000 adresów IP).
-Wykrywa aktywne hosty, usługi, technologie webowe, CMS-y, nagłówki i ciasteczka oraz zapisuje
-zmiany między kolejnymi skanami. Ma integrację z DefectDojo, role użytkowników i szyfrowanie
-danych w bazie.
+Narzędzie do cyklicznego, bezpiecznego discovery scanu dużych sieci (powyżej 10 000 adresów IP).
+Wykrywa aktywne hosty, usługi, technologie webowe, CMS-y, panele, nagłówki i ciasteczka, zapisuje
+zmiany między przebiegami, pozwala trwale korygować wyniki, eksportuje JSON/CSV i do DefectDojo.
+Ma cztery role, szyfrowanie wrażliwych pól i dziennik audytu.
 
-Backend: Rust (axum, sqlx, SQLite). Frontend: React + TypeScript (Vite). Skanowanie: nmap.
+Backend: Rust ([`backend/`](backend/README.md) — Axum, sqlx, PostgreSQL 16). Frontend: React + TypeScript
+(Vite, `frontend/`). Skanowanie: nmap + własny prober HTTP/TLS.
 
-## Struktura projektu
-
-```
-src/
-  main.rs            komendy CLI (serve, scan, import-targets, gen-key)
-  config.rs          konfiguracja z config/asi.toml
-  state.rs           stan aplikacji współdzielony przez API i harmonogram
-  input.rs           parsowanie celów: IP, CIDR, domeny (tekst, CSV, JSON)
-  scanner/
-    mod.rs           kolejka podgrup, równoległe procesy nmap, przerwanie po końcu okna
-    nmap.rs          uruchomienie nmap i parsowanie XML
-    http.rs          tytuł, kod, nagłówki, ciasteczka, certyfikat TLS, przekierowania
-  fingerprint.rs     silnik sygnatur YAML
-  diff.rs            porównanie skanów: nowe, znikające, zmienione usługi
-  pipeline.rs        pełny przebieg skanu i import wyników
-  scheduler.rs       okna czasowe i częstotliwość skanów
-  auth.rs            role, uprawnienia, hasła, sesje
-  defectdojo.rs      eksport findingów do DefectDojo
-  export.rs          eksport i import JSON/CSV
-  api/               endpointy REST, jeden plik na obszar (targets, runs, users, ...)
-  db/                zapytania SQL, jeden plik na tabelę; crypto.rs szyfruje pola
-frontend/src/
-  App.tsx            nawigacja i sesja
-  api.ts             klient REST
-  types.ts           typy odpowiedzi API
-  pages/             widoki: Dashboard, Cele, Skany, Sygnatury, Użytkownicy
-  components/        wspólne komponenty (tabela, karta, komunikaty)
-signatures/          wbudowane sygnatury
-migrations/          schemat bazy
-docker/              entrypoint kontenera
-```
-
-## Uruchomienie lokalne
-
-Wymagania: Rust (stable), Node.js 20, nmap w `PATH`.
+## Szybki start (Docker)
 
 ```bash
-cp .env.example .env
-cargo run -- gen-key                  # wynik wpisz do ASI_DATA_KEY w .env
-
-cd frontend && npm install && npm run build && cd ..
-
-cargo run -- import-targets examples/targets.csv
-cargo run -- serve                    # http://127.0.0.1:8080
+docker compose up -d --build            # http://127.0.0.1:8080, konto demo admin / admin
 ```
 
-Przy pierwszym starcie tworzone jest konto `admin`. Hasło jest brane z `ASI_ADMIN_PASSWORD`,
-a jeśli jej nie ustawiono, generowane i wypisywane w logu.
+Compose uruchamia: `db` (PostgreSQL 16), `keygen` (jednorazowo tworzy klucz szyfrowania w osobnym
+wolumenie `asi-keys`, nie w wolumenie bazy) i `asi` (backend ze skanerem nmap i interfejsem pod tym
+samym adresem). Konto `admin`/`admin` to konto demonstracyjne — nie wystawiaj aplikacji poza
+localhost i sieć labu; hasło zmienisz w zakładce Użytkownicy.
 
-Praca nad frontendem z automatycznym przeładowaniem:
+| Zmienna | Domyślnie | Opis |
+|---|---|---|
+| `ASI_PORT` | `8080` | port na `127.0.0.1` |
+| `ASI_PROJECT` | `asi` | nazwa projektu compose (np. drugi egzemplarz obok) |
+| `ASI_DB_PASSWORD` | `asi-demo` | hasło bazy |
+| `ASI_SCAN_CONFIG` | `backend/config/scan.toml` | plik konfiguracji skanu (porty, limity, okna czasowe) |
+| `ASI_SESSION_TTL_HOURS`, `ASI_COOKIE_SECURE` | `12`, `false` | sesja; `true` za HTTPS |
+| `ASI_DD_URL`, `ASI_DD_TOKEN`, `ASI_DD_ENGAGEMENT` | — | DefectDojo |
+
+## Laboratorium i scenariusz dwóch przebiegów
 
 ```bash
-cargo run -- serve                    # backend na :8080
-cd frontend && npm run dev            # frontend na :5173, /api przekierowane do backendu
+ASI_SCAN_CONFIG=lab/scan.toml docker compose --profile lab up -d --build
 ```
 
-Testy backendu: `cargo test`. Sprawdzenie typów frontendu: `npm run typecheck`.
+Sieć wewnętrzna `172.30.100.0/24` (bez dostępu do internetu):
 
-## Docker
+| Adres | Usługa | Co powinno być wykryte |
+|---|---|---|
+| 172.30.100.10 | nginx „staging” | nagłówki `X-Debug-Token`, `X-Environment: staging` |
+| 172.30.100.11 | Apache httpd | serwer Apache |
+| 172.30.100.12:8080 | Tomcat | Apache Tomcat |
+| 172.30.100.13 | WordPress | CMS WordPress, panel `/wp-login.php` |
+| 172.30.100.14:3306 | MariaDB | baza danych |
+| 172.30.100.15:3000 | Grafana | Grafana, panel logowania |
+| 172.30.100.16:443 | Caddy | HTTPS z certyfikatem self-signed |
+
+1. Zaloguj się (`admin`/`admin`), w zakładce **Cele** dodaj `172.30.100.0/27` (lub plik `lab/targets.txt`).
+2. **Skany → Uruchom skan**; po zakończeniu: **Usługi** (wyniki, technologie, ciasteczka bez wartości) i **Zmiany**.
+3. Jako analityk oznacz usługę (status `false_positive`, notatka) — korekta jest trwała.
+4. Zmień lab, np. `docker compose stop lab-grafana`, i uruchom drugi skan: zmiany `gone`, host `unstable`;
+   po `inactive_after_misses` przebiegach `inactive`. Korekta z kroku 3 jest widoczna w nowym przebiegu.
+5. Eksport CSV/JSON i (opcjonalnie) DefectDojo w zakładce Skany; viewer nie widzi akcji, API zwraca 403.
+
+## Praca lokalna bez Dockera
+
+Wymagania: Rust (stable), Node.js 20, PostgreSQL 16, nmap w `PATH` — szczegóły w [`backend/README.md`](backend/README.md).
 
 ```bash
-docker compose up -d --build          # skaner i dashboard: http://127.0.0.1:8080
-docker compose logs asi               # tu znajdziesz wygenerowane hasło admina
+cd frontend && npm ci && npm run build && cd ..
+export DATABASE_URL=postgres://asi:asi@127.0.0.1:5432/asi ASI_DEMO_KEY=1 ASI_STATIC_DIR=frontend/dist
+(cd backend && cargo run -p asi -- serve)                    # http://127.0.0.1:8080
+cd frontend && ASI_API=http://127.0.0.1:8080 npm run dev     # tryb deweloperski na :5173
 ```
 
-Laboratorium do sprawdzenia detekcji (nginx, Apache httpd, Tomcat, WordPress z MariaDB
-w wewnętrznej sieci 172.30.0.0/24):
-
-```bash
-docker compose --profile lab up -d --build
-docker compose run --rm asi import-targets examples/lab-targets.txt
-```
-
-Następnie w dashboardzie: Skany, Uruchom skan.
-
-| Plik | Opis |
-|---|---|
-| `Dockerfile` | trzy etapy: build frontendu (Node), build backendu (Rust), obraz `debian:bookworm-slim` z nmap; aplikacja działa jako użytkownik `asi` |
-| `docker/entrypoint.sh` | gdy brak `ASI_DATA_KEY`, generuje klucz w wolumenie danych (tylko do testów) |
-| `docker-compose.yml` | usługa `asi` (port tylko na 127.0.0.1, wolumen `asi-data`) i profil `lab` |
-
-Komendy CLI w kontenerze uruchamiaj przez `docker compose run --rm asi <komenda>`, a nie `exec`,
-żeby przeszły przez entrypoint i dostały klucz danych.
-
-Bez uprawnień roota nmap używa skanu `connect()`. SYN scan i wykrywanie hostów przez ICMP
-wymagają odkomentowania w `docker-compose.yml` opcji `user: root` i `cap_add: [NET_RAW, NET_ADMIN]`.
+Kontrole: w `backend/` — `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+`DATABASE_URL=… cargo test`; w `frontend/` — `npm run build`, `npm audit`.
 
 ## Wymagania zadania a implementacja
 
 | Wymaganie | Gdzie |
 |---|---|
-| Wczytanie IP, CIDR, domen (ręcznie, CSV, JSON) | `input.rs`, `api/targets.rs`, strona Cele |
-| Wielowątkowy skan nmap, podział na podgrupy, czas trwania | `scanner/mod.rs`, statystyki `chunks` i `duration_secs` przebiegu |
-| Ograniczanie tempa | `global_max_rate` dzielony na procesy (`--max-rate`), `http_concurrency` |
-| Okna czasowe, częstotliwość, wznowienie przerwanego skanu | `scheduler.rs`, `scan_runs.pending_json` |
-| Aktywne hosty i usługi | `scanner/nmap.rs` |
-| Tytuł, kod HTTP, nagłówki, ciasteczka, TLS, przekierowania | `scanner/http.rs` |
-| CMS, framework, serwer, IoT, staging, panel administracyjny | `signatures/default.yaml`, `fingerprint.rs` |
-| Własne sygnatury | `api/signatures.rs`, strona Sygnatury |
-| Porównanie skanów, nowe, znikające i zmienione usługi | `diff.rs`, `GET /api/runs/:id/changes`, `GET /api/diff?from=&to=` |
-| Hosty niestabilne | `db/hosts.rs` (active, unstable, inactive), ponowny pomiar w `pipeline.rs` |
-| Import wyników JSON/CSV przetwarzany jak skan | `pipeline::import_results` |
-| Eksport JSON/CSV | `GET /api/runs/:id/export?format=json` lub `csv` |
-| Edycja danych niezależnie od skanu | cele i adnotacje są w osobnych tabelach niż wyniki |
-| RBAC i cztery role | `auth.rs` |
-| Szyfrowanie danych w spoczynku | `db/crypto.rs` (AES-256-GCM) |
-| DefectDojo | `defectdojo.rs`, przycisk na stronie Skany |
-| Dashboard | `api/dashboard.rs`, `frontend/src/pages/DashboardPage.tsx` |
+| Wczytanie IP, CIDR, domen (ręcznie, CSV, JSON; plik organizatora z `ip_address`) | `asi-core/targets.rs`, `/api/v1/targets`, strona Cele |
+| Wielowątkowy skan nmap, podgrupy, czas trwania | `asi-scanner` (adaptacyjne podgrupy, workery), `scan_runs.coverage`, `duration_ms` |
+| Bezpieczeństwo i tempo | `Scope::check` przed każdym połączeniem, limit 256 KiB, `global_max_rate`, tylko GET |
+| Okna czasowe, częstotliwość, wznowienie | `asi-scanner/config.rs`, harmonogram w `asi-api/scans.rs`, `scan_chunks` |
+| Aktywne hosty i usługi | `asi-scanner/nmap.rs` (argumenty jako lista, `-iL -`) |
+| HTTP: tytuł, kod, nagłówki, ciasteczka, TLS, przekierowania | `asi-scanner/http.rs` |
+| CMS, framework, serwer, IoT, staging, panele | `signatures/default.yaml`, `asi-fingerprint` |
+| Własne sygnatury | `/api/v1/signatures`, strona Sygnatury |
+| Porównanie przebiegów, hosty niestabilne | `asi-core/diff.rs`, `asi-db/results.rs` (`unstable` → `inactive`) |
+| Import i eksport JSON/CSV, DefectDojo | `/api/v1/results/import`, `/runs/{id}/export`, `/runs/{id}/defectdojo` |
+| Edycja niezależna od skanu | korekty `/api/v1/overrides` nakładane na widok i eksport |
+| RBAC, 4 role | `asi-core/rbac.rs` (macierz §14.1), kontrola w każdym handlerze |
+| Szyfrowanie pól | `asi-crypto` (AES-256-GCM, AAD per rekord), redakcja sekretów w API |
+| Dashboard | `/api/v1/dashboard` (liczniki w SQL), strona Dashboard |
 
 ## Role
 
 | Uprawnienie | admin | editor | analyst | viewer |
 |---|---|---|---|---|
-| Odczyt | tak | tak | tak | tak |
-| Modyfikacja celów i adnotacji | tak | tak | tak | nie |
-| Dodawanie i import | tak | tak | nie | nie |
-| Usuwanie | tak | tak | nie | nie |
-| Uruchamianie skanów | tak | tak | nie | nie |
-| Zarządzanie sygnaturami | tak | tak | nie | nie |
-| Zarządzanie użytkownikami | tak | nie | nie | nie |
+| Odczyt i eksport | tak | tak | tak | tak |
+| Korekty wyników, konfiguracja i uruchamianie skanów, DefectDojo | tak | tak | tak | nie |
+| Dodawanie, import i usuwanie celów, tworzenie i usuwanie sygnatur | tak | tak | nie | nie |
+| Edycja istniejących celów i sygnatur | tak | tak | tak | nie |
+| Użytkownicy, audyt, odsłonięcie wartości ciasteczek | tak | nie | nie | nie |
 
-Frontend ukrywa niedostępne przyciski, ale uprawnienia sprawdza zawsze backend.
+Frontend ukrywa niedostępne przyciski na podstawie uprawnień z `/api/v1/me`; dostęp egzekwuje backend.
 
 ## Sygnatury
 
-Pliki `signatures/*.yaml` lub formularz na stronie Sygnatury. Typy reguł: `header`, `cookie`,
-`body`, `title`, `path` (żądanie GET bez logowania), `favicon_sha256`, `service` (banner z nmap),
-`hostname`, `port`.
+Pliki `signatures/*.yaml` lub strona Sygnatury. Typy reguł: `header`, `cookie`, `body`, `title`,
+`path` (GET bez logowania, tylko ścieżka w obrębie usługi, np. `/admin`), `favicon_sha256`, `service`
+(banner z nmap), `hostname`, `port`. Pewność = `confidence * (0.6 + 0.4 * udział spełnionych reguł)`.
 
 ```yaml
 - id: grafana
   name: Grafana
   category: application   # cms, framework, server, application, iot, admin_panel, staging, interesting
-  confidence: 85          # bazowa pewność 0-100
+  confidence: 85
   match: any              # any albo all
   rules:
     - type: title
       regex: '^Grafana'
-    - type: body
-      regex: 'grafana-app'
 ```
 
-Pewność detekcji = `confidence * (0.6 + 0.4 * udział spełnionych reguł)`.
+## Prototyp
 
-## Bezpieczeństwo skanera
-
-- tylko discovery: `nmap -sV --version-light`, bez skryptów NSE typu exploit lub brute force,
-- żądania HTTP wyłącznie metodą GET, bez prób logowania i bez przekierowań na inny host,
-- globalny limit pakietów na sekundę i limit równoległych połączeń HTTP,
-- limit liczby celów (`max_targets`) i rozmiaru zakresu CIDR.
+Katalog `src/` (oraz `Cargo.toml`, `migrations/`, `config/` w katalogu głównym) to pierwszy prototyp na
+SQLite. Nie jest już budowany przez `Dockerfile` ani `docker-compose.yml`; jego moduły zostały przeniesione
+do `backend/`. Plan napraw i decyzje: `PLAN_NAPRAW.md`, `AUDYT.md`, `openspec/changes/`.
 
 ## Do zrobienia
 
-- sondowanie HTTP z nagłówkiem `Host` dla celów będących domenami, odczyt SAN z certyfikatów,
-- hash favicony w formacie mmh3 (zgodny z Shodan),
-- wykrywanie różnic zależnych od pory dnia,
-- ocena priorytetu analitycznego znalezisk,
-- `reimport-scan` w DefectDojo i wysyłka surowego XML z nmap,
-- limit prób logowania, trwałe sesje, dziennik zmian.
+- SNI dla vhostów HTTPS celów-domen, odczyt SAN z certyfikatów, favicon mmh3,
+- `reimport-scan` w DefectDojo, token CSRF, limit logowań wspólny dla wielu instancji API,
+- pomiar wydajności na ponad 10 000 unikatowych adresów i próba na środowisku organizatora.
