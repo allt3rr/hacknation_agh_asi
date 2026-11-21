@@ -59,7 +59,7 @@ start = "22:00"
 end = "06:00"
 days = []  # puste = codziennie; np. ["mon", "tue", "wed", "thu", "fri"]
 
-# [defectdojo]
-# url = "https://defectdojo.example.local"
-# engagement_id = 1
-# token_env = "ASI_DD_TOKEN"
+[defectdojo]
+url = "http://host.docker.internal:8081"
+engagement_id = 1
+token_env = "ASI_DD_TOKEN"

@@ -30,7 +30,10 @@ pub async fn push(config: &DefectDojoConfig, run_id: &str, observations: &[Obser
         .part("file", file);
 
     let url = format!("{}/api/v2/import-scan/", config.url.trim_end_matches('/'));
-    let response = reqwest::Client::new()
+    // timeout: skan czeka na wysyłkę z założoną blokadą, zawieszone DefectDojo nie może jej trzymać w nieskończoność
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()?
         .post(url)
         .header("Authorization", format!("Token {token}"))
         .multipart(form)
