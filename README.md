@@ -86,7 +86,9 @@ pełnej powierzchni ataku. ASI rozwiązuje to przez:
 | `version_conditional` | CVE dotyczy produktu tylko w połączeniu z innym komponentem |
 
 ### Harmonogram, raporty i integracje
-- Harmonogram cyklicznych skanów: cele, częstotliwość, okna czasowe i dni tygodnia — z poziomu interfejsu.
+- Harmonogram cyklicznych skanów złożony z **pozycji** — każda ma własną nazwę, cele, częstotliwość (1–720 h),
+  okna czasowe z dniami tygodnia i tryb sprawdzania podatności (`ask` / `auto` / `off`). Ustawiany w interfejsie.
+- W danej chwili trwa najwyżej jeden skan — należne pozycje czekają, aż bieżący przebieg się skończy.
 - Dashboard z licznikami, technologiami, ciekawymi znaleziskami i ostatnimi zmianami.
 - Eksport JSON/CSV (profil `safe` lub `raw`), raport PDF przebiegu, import wyników JSON/CSV.
 - **DefectDojo**: automatyczna wysyłka findingów (engagement `ASI <ip>` per host) oraz ręczna ponowna wysyłka.
@@ -162,11 +164,11 @@ cd frontend && ASI_API=http://127.0.0.1:8080 npm run dev
 
 ### Przez interfejs
 
-1. **Cele** — dodaj adresy IP, zakresy CIDR lub domeny ręcznie albo zaimportuj plik CSV/JSON.
-2. **Skany → Harmonogram** — ustaw częstotliwość i okna czasowe albo uruchom skan ręcznie.
-3. **Przebiegi** — śledź postęp, czas trwania i pokrycie; po zakończeniu potwierdź sprawdzenie podatności (**Sprawdzić podatności?**).
-4. **Dashboard** — przeglądaj najważniejsze znaleziska i zmiany względem poprzedniego przebiegu.
-5. **Sygnatury** — dodawaj własne reguły detekcji.
+1. **Konfiguracja → Cele** — dodaj adresy IP, zakresy CIDR lub domeny ręcznie albo zaimportuj plik CSV/JSON.
+2. **Skany → Harmonogram** — dodaj pozycje harmonogramu (cele, częstotliwość, okna czasowe, tryb podatności) albo uruchom skan ręcznie.
+3. **Skany → Przebiegi** — śledź postęp, czas trwania i pokrycie; po zakończeniu potwierdź sprawdzenie podatności (**Sprawdzić podatności?**).
+4. **Przegląd** — dashboard z najważniejszymi znaleziskami i zmianami względem poprzedniego przebiegu.
+5. **Konfiguracja → Sygnatury** — dodawaj własne reguły detekcji.
 6. Eksportuj wyniki do JSON/CSV/PDF lub wyślij je do DefectDojo (**CVE → DefectDojo**).
 
 ### Import celów z CSV
@@ -253,6 +255,8 @@ mode = "ask"     # ask | auto | off
 verify = false   # potwierdzanie szablonami nuclei
 ```
 
+> Sekcja `[schedule]` w `scan.toml` jest ignorowana (zostaje dla zgodności) — harmonogram ustawia się w interfejsie lub przez `/api/v1/schedules`.
+
 ## Role i uprawnienia
 
 | Uprawnienie | admin | editor | analyst | viewer |
@@ -283,7 +287,7 @@ Role odpowiadają wymaganiom zadania: **Administracja**, **Dodawanie/usuwanie/mo
 │   ├── migrations/            # migracje SQL
 │   └── signatures/            # wbudowane sygnatury
 ├── frontend/src/
-│   ├── pages/                 # Dashboard, Cele, Przebiegi, Harmonogram, Sygnatury, Użytkownicy
+│   ├── pages/                 # Przegląd (dashboard), Cele, Przebiegi, Harmonogram, Sygnatury, Użytkownicy
 │   └── components/            # komponenty UI
 ├── Dockerfile
 └── docker-compose.yml
@@ -309,7 +313,7 @@ npm audit
 | Wczytanie IP, CIDR, domen (ręcznie, CSV, JSON) | `asi-core/targets.rs`, `/api/v1/targets`, strona Cele |
 | Wielowątkowy skan, podgrupy, czas trwania | `asi-scanner` (adaptacyjne podgrupy, workery), `duration_ms` |
 | Bezpieczeństwo i tempo | `Scope::check`, limit 256 KiB, `global_max_rate`, tylko GET |
-| Okna czasowe, częstotliwość, wznowienie | harmonogram `/api/v1/schedule`, `scan_chunks` |
+| Okna czasowe, częstotliwość, wznowienie | pozycje harmonogramu `/api/v1/schedules` (tabela `scan_schedules`), `scan_chunks` |
 | Aktywne hosty i usługi | `asi-scanner/nmap.rs` |
 | HTTP: tytuł, kod, nagłówki, ciasteczka, TLS, przekierowania | `asi-scanner/http.rs` |
 | CMS, framework, serwer, IoT, staging, panele | `backend/signatures/default.yaml`, `asi-fingerprint` |
