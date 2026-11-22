@@ -8,6 +8,7 @@ import { FilePicker } from "../components/FilePicker";
 import { ObservationTable } from "../components/ObservationTable";
 import { ScanProgress } from "../components/ScanProgress";
 import { TargetPicker } from "../components/TargetPicker";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { SEVERITIES, SEVERITY_COLORS, VULN_STATE_LABELS, VulnTable } from "../components/VulnTable";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
@@ -289,42 +290,49 @@ export function RunsPage({ session }: { session: Session }) {
                       )
                     ) : (
                       <>
-                        <button className={BTN_SECONDARY} aria-label={`Zmiany w przebiegu ${name}`} onClick={() => showChanges(r)}>Zmiany</button>
-                        <button className={BTN_SECONDARY} aria-label={`Usługi w przebiegu ${name}`} onClick={() => showServices(r)}>Usługi</button>
-                        {(r.vuln_state === "done" || r.vuln_state === "failed") && (
-                          <button className={BTN_SECONDARY} aria-label={`Podatności w przebiegu ${name}`} onClick={() => showVulns(r)}>CVE</button>
-                        )}
+                        {/* Select jako menu akcji: value="" zostawia placeholder, wybór od razu uruchamia akcję */}
+                        <Select
+                          value=""
+                          onValueChange={(v) => (v === "changes" ? showChanges(r) : v === "services" ? showServices(r) : showVulns(r))}
+                        >
+                          <SelectTrigger aria-label={`Podgląd przebiegu ${name}`}>
+                            <SelectValue placeholder="Podgląd" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="changes">Zmiany</SelectItem>
+                            <SelectItem value="services">Usługi</SelectItem>
+                            {(r.vuln_state === "done" || r.vuln_state === "failed") && <SelectItem value="vulns">CVE</SelectItem>}
+                          </SelectContent>
+                        </Select>
                         {canRun && (r.status === "done" || r.status === "partial") && r.vuln_state !== "running" && r.vuln_state !== "pending_decision" && (
                           <button className={BTN_SECONDARY} aria-label={`Sprawdź podatności w przebiegu ${name}`} onClick={() => checkVulns(r)}>
-                            {r.vuln_state === "done" ? "Sprawdź ponownie" : "Sprawdź CVE"}
+                            {r.vuln_state === "done" ? "Sprawdź ponownie CVE" : "Sprawdź CVE"}
                           </button>
                         )}
-                        {r.vuln_state === "done" && can(session, "integrations.export") && (
-                          <button
-                            className={BTN_SECONDARY}
-                            title="Wyślij info z wynikami CVE do DefectDojo (engagement per IP)"
-                            aria-label={`Wyślij wyniki CVE przebiegu ${name} do DefectDojo`}
-                            onClick={() => sendToDefectDojo(r)}
-                          >
-                            CVE → DefectDojo
-                          </button>
-                        )}
-                        {can(session, "export") && (
-                          <>
-                            <button className={BTN_SECONDARY} aria-label={`Eksport przebiegu ${name} do JSON`} onClick={() => exportRun(r, "json")}>JSON</button>
-                            <button className={BTN_SECONDARY} aria-label={`Eksport przebiegu ${name} do CSV`} onClick={() => exportRun(r, "csv")}>CSV</button>
-                          </>
-                        )}
-                        <button
-                          className={BTN_SECONDARY}
-                          title="Pobierz raport PDF"
-                          aria-label={`Pobierz raport PDF z przebiegu ${name}`}
-                          aria-busy={pdfBusy === r.id}
-                          disabled={r.status === "queued" || pdfBusy !== null}
-                          onClick={() => downloadReport(r)}
+                        <Select
+                          value=""
+                          onValueChange={(v) => (v === "dd" ? sendToDefectDojo(r) : v === "pdf" ? downloadReport(r) : exportRun(r, v as "json" | "csv"))}
                         >
-                          {pdfBusy === r.id ? "PDF…" : "PDF"}
-                        </button>
+                          <SelectTrigger aria-label={`Eksport przebiegu ${name}`} aria-busy={pdfBusy === r.id}>
+                            <SelectValue placeholder={pdfBusy === r.id ? "Export…" : "Export"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {r.vuln_state === "done" && can(session, "integrations.export") && (
+                              <SelectItem value="dd" title="Wyślij info z wynikami CVE do DefectDojo (engagement per IP)">
+                                CVE → DefectDojo
+                              </SelectItem>
+                            )}
+                            {can(session, "export") && (
+                              <>
+                                <SelectItem value="json">JSON</SelectItem>
+                                <SelectItem value="csv">CSV</SelectItem>
+                              </>
+                            )}
+                            <SelectItem value="pdf" disabled={r.status === "queued" || pdfBusy !== null}>
+                              PDF
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
                       </>
                     )}
                   </div>
