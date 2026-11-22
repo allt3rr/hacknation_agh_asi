@@ -103,62 +103,75 @@ pełnej powierzchni ataku. ASI rozwiązuje to przez:
 
 ### Wymagania wstępne
 
-| Tryb | Wymagania |
-|---|---|
-| Docker (zalecany) | Docker 24+ z Docker Compose |
-| Lokalnie | Rust (stable), Node.js 24, PostgreSQL 16, `nmap` w `PATH`, opcjonalnie `nuclei` |
+- **Docker** 24+ z **Docker Compose** (Docker Desktop na Windows/macOS lub Docker Engine na Linuksie).
+- Wolny port `8080` na `127.0.0.1` (można go zmienić zmienną `ASI_PORT`).
 
-### Szybki start (Docker)
+### Uruchomienie (Docker)
 
-1. Skopiuj plik środowiskowy i ustaw hasła:
+1. **Utwórz plik `.env`** w katalogu głównym projektu (obok `docker-compose.yml`). Plik jest
+   w `.gitignore` — nie trafia do repozytorium.
 
-   ```bash
-   cp .env.example .env
-   # ASI_ADMIN_PASSWORD — hasło pierwszego administratora (min. 10 znaków)
-   # ASI_DB_PASSWORD    — hasło bazy, np. z: openssl rand -hex 32
+2. **Wpisz do `.env` sekrety**. Wymagane są dwa:
+
+   | Nazwa | Wymagany | Co wpisać |
+   |---|---|---|
+   | `ASI_ADMIN_PASSWORD` | tak | hasło konta `admin`, minimum 10 znaków |
+   | `ASI_DB_PASSWORD` | tak | hasło bazy PostgreSQL — długi losowy ciąg, np. z `openssl rand -hex 32` |
+   | `ASI_DD_URL` | nie | adres DefectDojo, np. `http://host.docker.internal:8081` |
+   | `ASI_DD_TOKEN` | nie | token API DefectDojo |
+   | `ASI_DD_PRODUCT` | nie | id produktu w DefectDojo |
+   | `ASI_NVD_API_KEY` | nie | klucz NVD API (wyższy limit zapytań przy sprawdzaniu CVE) |
+
+   Minimalny plik `.env`:
+
+   ```dotenv
+   ASI_ADMIN_PASSWORD=TwojeMocneHaslo123
+   ASI_DB_PASSWORD=wstaw-losowy-ciag
    ```
 
-2. Zbuduj i uruchom:
+   Integracja z DefectDojo działa tylko wtedy, gdy ustawione są wszystkie trzy zmienne `ASI_DD_*`.
+   Klucz szyfrowania danych **nie jest** sekretem do wpisania — generuje go automatycznie usługa `keygen`.
+
+3. **Zbuduj i uruchom kontenery**:
 
    ```bash
    docker compose up -d --build
    ```
 
-3. Otwórz **http://127.0.0.1:8080** i zaloguj się jako `admin`.
+   Pierwsze budowanie trwa kilka minut. Stan usług sprawdzisz poleceniem `docker compose ps`,
+   a logi — `docker compose logs -f asi`.
+
+4. **Otwórz aplikację**: **http://127.0.0.1:8080**
 
 Compose uruchamia trzy usługi:
 - `db` — PostgreSQL 16,
 - `keygen` — jednorazowo generuje klucz szyfrowania w osobnym wolumenie `asi-keys`,
 - `asi` — backend z nmap, nuclei i zbudowanym interfejsem.
 
-> Konto `admin` tworzone jest wyłącznie na pustej bazie. Hasła kolejnych kont zmienia się w zakładce **Użytkownicy**.
+Zatrzymanie: `docker compose down` (dane zostają w wolumenach). Pełne usunięcie razem z danymi: `docker compose down -v`.
 
-### Uruchomienie lokalne (bez Dockera)
+### Logowanie
 
-```bash
-# 1. Baza danych
-docker run -d --name asi-pg -e POSTGRES_USER=asi -e POSTGRES_PASSWORD=asi -e POSTGRES_DB=asi \
-  -p 127.0.0.1:5432:5432 postgres:16-alpine
+| Pole | Wartość |
+|---|---|
+| Login | `admin` |
+| Hasło | wartość `ASI_ADMIN_PASSWORD` z pliku `.env` |
 
-# 2. Frontend
-cd frontend && npm ci && npm run build && cd ..
-
-# 3. Backend
-read -rs -p "Hasło pierwszego administratora: " ASI_ADMIN_PASSWORD
-export ASI_ADMIN_PASSWORD
-export DATABASE_URL=postgres://asi:asi@127.0.0.1:5432/asi
-export ASI_DEMO_KEY=1                      # klucz w pamięci — tylko demo
-export ASI_STATIC_DIR=../frontend/dist
-(cd backend && cargo run -p asi -- serve)  # http://127.0.0.1:8080
-```
-
-Tryb deweloperski frontendu (hot reload na porcie 5173):
+Hasło sprawdzisz w pliku `.env` w katalogu głównym projektu:
 
 ```bash
-cd frontend && ASI_API=http://127.0.0.1:8080 npm run dev
+grep ASI_ADMIN_PASSWORD .env
 ```
 
-> W środowisku produkcyjnym zamiast `ASI_DEMO_KEY` ustaw `ASI_MASTER_KEY_FILE` (32 bajty w base64, np. `openssl rand -base64 32 > master.key`).
+W PowerShell: `Select-String ASI_ADMIN_PASSWORD .env`.
+
+> Konto `admin` tworzone jest **tylko przy pierwszym starcie, na pustej bazie**. Późniejsza zmiana
+> `ASI_ADMIN_PASSWORD` w `.env` nie zmienia hasła — zmienisz je w zakładce **Konfiguracja → Użytkownicy**.
+> Jeśli nie pamiętasz hasła, a dane nie są potrzebne, usuń wolumeny (`docker compose down -v`),
+> ustaw nowe hasło w `.env` i uruchom kontenery ponownie.
+
+Gdy `ASI_ADMIN_PASSWORD` jest puste lub krótsze niż 10 znaków, kontener `asi` nie wystartuje
+(w logach: `Pierwszy start wymaga ASI_ADMIN_PASSWORD`).
 
 ## Użycie
 
