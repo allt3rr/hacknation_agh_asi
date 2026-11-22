@@ -1,6 +1,0 @@
-{
-  "targets": [
-    "10.10.2.0/28",
-    { "target": "staging.example.local", "tags": ["staging"], "note": "Środowisko testowe" }
-  ]
-}

@@ -25,7 +25,7 @@ const STATUS_COLORS: Record<RunStatus, string> = {
 const PAGE_SIZE = 100;
 // bez scans.run lista wyboru nie jest pokazywana, więc nie pobieramy celów (stabilna referencja dla useApiData)
 const noTargets = () => Promise.resolve<Target[]>([]);
-const REFRESH_MS = 5000;
+const REFRESH_MS = 1000;
 
 type Details =
   | { kind: "services"; run: Run; offset: number; page: Page<ResultRow> }
@@ -161,6 +161,15 @@ export function RunsPage({ session }: { session: Session }) {
                             <button className={BTN_SECONDARY} aria-label={`Eksport przebiegu ${name} do CSV`} onClick={() => exportRun(r, "csv")}>CSV</button>
                           </>
                         )}
+                        <button
+                          className={BTN_SECONDARY}
+                          title="Raport do druku lub zapisu jako PDF"
+                          aria-label={`Wygeneruj raport PDF z przebiegu ${name}`}
+                          disabled={r.status === "queued"}
+                          onClick={() => run(() => printRunReport(r, session))}
+                        >
+                          PDF
+                        </button>
                         {can(session, "integrations.export") && (
                           <button className={BTN_SECONDARY} aria-label={`Wyślij przebieg ${name} do DefectDojo`} onClick={() => sendToDefectDojo(r)}>DefectDojo</button>
                         )}
@@ -169,20 +178,6 @@ export function RunsPage({ session }: { session: Session }) {
                   </div>
                 );
               },
-            },
-            {
-              header: "Raport",
-              render: (r) => (
-                <button
-                  className={BTN_SECONDARY}
-                  title="Wygeneruj raport w formie pdf"
-                  aria-label={`Wygeneruj raport PDF z przebiegu ${formatDate(r.started_at ?? r.created_at)}`}
-                  disabled={r.status === "running" || r.status === "queued"}
-                  onClick={() => run(() => printRunReport(r, session))}
-                >
-                  Wygeneruj...
-                </button>
-              ),
             },
           ]}
         />

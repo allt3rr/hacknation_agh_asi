@@ -1,7 +1,6 @@
 # ASI backend (PostgreSQL)
 
-Docelowy backend ASI: workspace Cargo na PostgreSQL 16. Zastępuje prototyp z katalogu `src/`
-w repo (SQLite), którego moduły są przenoszone tu w kolejnych zmianach OpenSpec.
+Backend ASI korzysta z PostgreSQL 16.
 
 | Crate | Zakres |
 |---|---|
@@ -105,8 +104,7 @@ Pełne wartości: tylko `GET /observations/{id}/secrets` z uprawnieniem `results
 
 ## Import CSV
 
-Dwa formaty z nagłówkiem: własny `target,tags,note` (tagi oddzielone `;`) oraz format organizatora
-(`network_addresses_services_10k.csv`): kolumna `ip_address` jest celem, a `subnet_cidr`, `network_zone`
+Dwa formaty z nagłówkiem: własny `target,tags,note` (tagi oddzielone `;`) oraz format organizatora. W drugim formacie kolumna `ip_address` jest celem, a `subnet_cidr`, `network_zone`
 i `hostname` stają się tagami `subnet:…`, `zone:…`, `host:…` — podsieć nie jest rozwijana. Ponowny import
 nie nadpisuje istniejących celów ani ich edycji (liczone jako duplikaty).
 

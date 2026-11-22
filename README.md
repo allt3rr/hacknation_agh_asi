@@ -32,38 +32,15 @@ Rotację hasła bazy skoordynuj ze zmianą hasła tej roli. Hasło konta aplikac
 | `ASI_SESSION_TTL_HOURS`, `ASI_COOKIE_SECURE` | `12`, `false` | sesja; `true` za HTTPS |
 | `ASI_DD_URL`, `ASI_DD_TOKEN`, `ASI_DD_ENGAGEMENT` | — | DefectDojo: wyniki są wysyłane automatycznie po każdym skanie (błąd tylko w logu) i ręcznie przyciskiem; DefectDojo na hoście: `http://host.docker.internal:8081` |
 
-## Laboratorium i scenariusz dwóch przebiegów
-
-```bash
-ASI_SCAN_CONFIG=lab/scan.toml docker compose --profile lab up -d --build
-```
-
-Sieć wewnętrzna `172.30.100.0/24` (bez dostępu do internetu):
-
-| Adres | Usługa | Co powinno być wykryte |
-|---|---|---|
-| 172.30.100.10 | nginx „staging” | nagłówki `X-Debug-Token`, `X-Environment: staging` |
-| 172.30.100.11 | Apache httpd | serwer Apache |
-| 172.30.100.12:8080 | Tomcat | Apache Tomcat |
-| 172.30.100.13 | WordPress | CMS WordPress, panel `/wp-login.php` |
-| 172.30.100.14:3306 | MariaDB | baza danych |
-| 172.30.100.15:3000 | Grafana | Grafana, panel logowania |
-| 172.30.100.16:443 | Caddy | HTTPS z certyfikatem self-signed |
-
-1. Zaloguj się jako administrator, w zakładce **Cele** dodaj `172.30.100.0/27` (lub plik `lab/targets.txt`).
-2. **Skany → Uruchom skan**; po zakończeniu: **Usługi** (wyniki, technologie, ciasteczka bez wartości) i **Zmiany**.
-3. Jako analityk oznacz usługę (status `false_positive`, notatka) — korekta jest trwała.
-4. Zmień lab, np. `docker compose stop lab-grafana`, i uruchom drugi skan: zmiany `gone`, host `unstable`;
-   po `inactive_after_misses` przebiegach `inactive`. Korekta z kroku 3 jest widoczna w nowym przebiegu.
-5. Eksport CSV/JSON i (opcjonalnie) DefectDojo w zakładce Skany; viewer nie widzi akcji, API zwraca 403.
-
 ## Praca lokalna bez Dockera
 
-Wymagania: Rust (stable), Node.js 20, PostgreSQL 16, nmap w `PATH` — szczegóły w [`backend/README.md`](backend/README.md).
+Wymagania: Rust (stable), Node.js 24, PostgreSQL 16, nmap w `PATH` — szczegóły w [`backend/README.md`](backend/README.md).
 
 ```bash
 cd frontend && npm ci && npm run build && cd ..
-export DATABASE_URL=postgres://asi:asi@127.0.0.1:5432/asi ASI_DEMO_KEY=1 ASI_STATIC_DIR=frontend/dist
+read -rs -p "Hasło pierwszego administratora: " ASI_ADMIN_PASSWORD
+export ASI_ADMIN_PASSWORD
+export DATABASE_URL=postgres://asi:asi@127.0.0.1:5432/asi ASI_DEMO_KEY=1 ASI_STATIC_DIR=../frontend/dist
 (cd backend && cargo run -p asi -- serve)                    # http://127.0.0.1:8080
 cd frontend && ASI_API=http://127.0.0.1:8080 npm run dev     # tryb deweloperski na :5173
 ```
@@ -81,7 +58,7 @@ Kontrole: w `backend/` — `cargo fmt --check`, `cargo clippy --all-targets -- -
 | Okna czasowe, częstotliwość, wznowienie | `asi-scanner/config.rs`, harmonogram w `asi-api/scans.rs`, `scan_chunks`; ustawianie z interfejsu: zakładka Harmonogram (`GET/PUT /api/v1/schedule`, tabela `scan_schedule`) |
 | Aktywne hosty i usługi | `asi-scanner/nmap.rs` (argumenty jako lista, `-iL -`) |
 | HTTP: tytuł, kod, nagłówki, ciasteczka, TLS, przekierowania | `asi-scanner/http.rs` |
-| CMS, framework, serwer, IoT, staging, panele | `signatures/default.yaml`, `asi-fingerprint` |
+| CMS, framework, serwer, IoT, staging, panele | `backend/signatures/default.yaml`, `asi-fingerprint` |
 | Własne sygnatury | `/api/v1/signatures`, strona Sygnatury |
 | Porównanie przebiegów, hosty niestabilne | `asi-core/diff.rs`, `asi-db/results.rs` (`unstable` → `inactive`) |
 | Import i eksport JSON/CSV, DefectDojo | `/api/v1/results/import`, `/runs/{id}/export`, `/runs/{id}/defectdojo` |
@@ -104,7 +81,7 @@ Frontend ukrywa niedostępne przyciski na podstawie uprawnień z `/api/v1/me`; d
 
 ## Sygnatury
 
-Pliki `signatures/*.yaml` lub strona Sygnatury. Typy reguł: `header`, `cookie`, `body`, `title`,
+Pliki `backend/signatures/*.yaml` lub strona Sygnatury. Typy reguł: `header`, `cookie`, `body`, `title`,
 `path` (GET bez logowania, tylko ścieżka w obrębie usługi, np. `/admin`), `favicon_sha256`, `service`
 (banner z nmap), `hostname`, `port`. Pewność = `confidence * (0.6 + 0.4 * udział spełnionych reguł)`.
 
@@ -119,14 +96,7 @@ Pliki `signatures/*.yaml` lub strona Sygnatury. Typy reguł: `header`, `cookie`,
       regex: '^Grafana'
 ```
 
-## Prototyp
+## Struktura repozytorium
 
-Katalog `src/` (oraz `Cargo.toml`, `migrations/`, `config/` w katalogu głównym) to pierwszy prototyp na
-SQLite. Nie jest już budowany przez `Dockerfile` ani `docker-compose.yml`; jego moduły zostały przeniesione
-do `backend/`. Plan napraw i decyzje: `PLAN_NAPRAW.md`, `AUDYT.md`, `openspec/changes/`.
-
-## Do zrobienia
-
-- SNI dla vhostów HTTPS celów-domen, odczyt SAN z certyfikatów, favicon mmh3,
-- `reimport-scan` w DefectDojo, token CSRF, limit logowań wspólny dla wielu instancji API,
-- pomiar wydajności na ponad 10 000 unikatowych adresów i próba na środowisku organizatora.
+- [backend/](backend/README.md) zawiera aplikację PostgreSQL, migracje, konfigurację i wbudowane sygnatury.
+- [frontend/](frontend/) zawiera interfejs React, klienta API i zasoby interfejsu.

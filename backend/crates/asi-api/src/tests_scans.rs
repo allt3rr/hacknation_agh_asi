@@ -15,7 +15,7 @@ use std::time::Duration;
 use time::PrimitiveDateTime;
 
 fn signatures_dir() -> PathBuf {
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../signatures"))
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../signatures"))
 }
 
 fn cfg() -> ScanConfig {

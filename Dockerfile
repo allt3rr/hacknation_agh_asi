@@ -29,7 +29,7 @@ RUN apk add --no-cache "zlib>=1.4-r0" nmap nmap-nselibs nmap-scripts ca-certific
 WORKDIR /app
 COPY --from=backend /usr/local/bin/asi /usr/local/bin/asi
 COPY --from=frontend /frontend/dist ./ui
-COPY signatures ./signatures
+COPY backend/signatures ./signatures
 COPY backend/config/scan.toml ./config/scan.toml
 
 ENV ASI_BIND=0.0.0.0:8080 \

@@ -1,6 +1,5 @@
 # Rust
-/target/
-/backend/target/
+**/target/
 *.rs.bk
 
 # Frontend
@@ -14,7 +13,6 @@
 *.db-wal
 .env
 asi_import.csv
-network_addresses_services_10k.csv
 
 # IDE i narzędzia lokalne
 .idea/
@@ -27,10 +25,13 @@ AGH - Pełna treść zadania konkursowego.pdf
 AGH - Regulamin zadania konkursowego.pdf
 
 node_modules/
-!Cargo.lock
-# lockfile nowego backendu wersjonujemy (powtarzalny build, cargo --locked)
-!backend/Cargo.lock
 CLAUDE.md
-package-lock.json
-package.json
-docs/ATTACK_SURFACE_INTELLIGENCE.md
+/package-lock.json
+/package.json
+
+# Lokalne materiały i wycofany prototyp
+/docs/
+/backend/legacy-sqlite/
+
+# Osobny lokalny checkout integracji
+/django-DefectDojo/

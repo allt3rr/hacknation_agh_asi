@@ -19,7 +19,7 @@ use tower::ServiceExt;
 const SECRET: &str = "tajny-123";
 
 async fn state(db: &PgPool) -> AppState {
-    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../signatures"));
+    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../signatures"));
     let svc = ScanService::new(
         Ok(ScanConfig::default()),
         AnyRunner::Fake(FakeRunner::default()),
@@ -581,7 +581,7 @@ async fn scan_pushes_to_defectdojo_automatically(db: PgPool) {
         open_port: 22,
         ..Default::default()
     };
-    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../signatures"));
+    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../signatures"));
     let cfg = ScanConfig {
         recheck_missing: false,
         ..Default::default()

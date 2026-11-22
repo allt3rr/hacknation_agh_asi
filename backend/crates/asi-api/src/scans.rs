@@ -381,14 +381,23 @@ pub async fn load_saved_schedule(st: &AppState) {
 /// Pętla harmonogramu w `asi serve`. Ustawienia są czytane co minutę, więc zmiana z interfejsu
 /// działa bez restartu. Błędna konfiguracja skanu blokuje harmonogram (z logiem).
 pub async fn scheduler(st: AppState) {
-    if st.scans.cfg.is_err() {
+    let scan_ok = st.scans.cfg.is_ok();
+    if !scan_ok {
         tracing::error!("harmonogram wyłączony: błędna konfiguracja skanu");
-        return;
     }
     load_saved_schedule(&st).await;
     let mut tick = tokio::time::interval(Duration::from_secs(60));
     loop {
         tick.tick().await;
+        // przebieg po restarcie/awarii procesu zostaje `running` z wygasłą dzierżawą; bez tego UI blokuje start
+        match runs::recover_orphans(&st.db).await {
+            Ok(0) => {}
+            Ok(n) => tracing::warn!(count = n, "osierocone przebiegi oznaczone jako failed"),
+            Err(e) => tracing::error!(error = %e, "błąd sprzątania osieroconych przebiegów"),
+        }
+        if !scan_ok {
+            continue;
+        }
         let schedule = st.scans.schedule();
         if !schedule.enabled {
             continue;
