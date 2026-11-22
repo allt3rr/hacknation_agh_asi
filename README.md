@@ -197,32 +197,6 @@ example.com,web,
 Format organizatora — kolumna `ip_address` jest celem, a `subnet_cidr`, `network_zone` i `hostname`
 stają się tagami `subnet:…`, `zone:…`, `host:…`. Ponowny import nie nadpisuje istniejących celów.
 
-### Przykłady API
-
-```bash
-# Logowanie (sesja w cookie)
-curl -c cookies.txt -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"<hasło>"}' \
-  http://127.0.0.1:8080/api/v1/auth/login
-
-# Import celów z pliku CSV
-curl -b cookies.txt --data-binary @targets.csv \
-  'http://127.0.0.1:8080/api/v1/targets/import?format=csv'
-
-# Start skanu wszystkich celów → {"run_id": "..."}
-curl -b cookies.txt -X POST http://127.0.0.1:8080/api/v1/runs
-
-# Eksport wyników przebiegu do CSV
-curl -b cookies.txt -o wyniki.csv \
-  'http://127.0.0.1:8080/api/v1/runs/<run_id>/export?format=csv'
-
-# Raport PDF
-curl -b cookies.txt -o raport.pdf \
-  http://127.0.0.1:8080/api/v1/runs/<run_id>/report.pdf
-```
-
-Pełna lista endpointów: [`backend/README.md`](backend/README.md).
-
 ### Własna sygnatura
 
 ```yaml
@@ -275,7 +249,7 @@ verify = false   # potwierdzanie szablonami nuclei
 | Uprawnienie | admin | editor | analyst | viewer |
 |---|:-:|:-:|:-:|:-:|
 | Odczyt i eksport | ✅ | ✅ | ✅ | ✅ |
-| Korekty wyników, uruchamianie skanów, DefectDojo | ✅ | ✅ | ✅ | ❌ |
+| Korekty wyników, uruchamianie skanów, DefectDojo | ✅ | ✅ | ❌ | ❌ |
 | Edycja istniejących celów i sygnatur | ✅ | ✅ | ✅ | ❌ |
 | Dodawanie, import i usuwanie celów i sygnatur | ✅ | ✅ | ❌ | ❌ |
 | Użytkownicy, audyt, odsłonięcie wartości ciasteczek | ✅ | ❌ | ❌ | ❌ |
