@@ -42,14 +42,14 @@ verify = false
 # cache_hours = 24
 # verify_rate = 20
 
-# Harmonogram zapisany w interfejsie (zakładka Harmonogram) zastępuje tę sekcję.
+# Ignorowane: harmonogram (pozycje z celami, częstotliwością i oknami) ustawia się w interfejsie
+# (Skany → Harmonogram). Sekcja zostaje dla zgodności; okna nie ograniczają startu ręcznego.
 [schedule]
 enabled = false
 every_hours = 24
 
 # Okna czasowe (czas lokalny). Skan w oknie dostaje termin = koniec okna; po nim cały ruch
 # (nmap, HTTP, ponowienia) jest przerywany, a zaległa praca wznawiana w następnym oknie.
-# Gdy okna są zdefiniowane, ręczny start poza oknem jest odrzucany.
 # [[schedule.windows]]
 # start = "22:00"
 # end = "06:00"

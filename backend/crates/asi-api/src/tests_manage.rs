@@ -73,6 +73,21 @@ async fn targets_manual_add_and_permission_matrix(db: PgPool) {
     let patch = json!({ "note": "serwer księgowości", "tags": ["dmz"] });
     let ok = call(&st, "PATCH", &path, Some(&analyst), Some(patch)).await;
     assert_eq!(ok.status(), StatusCode::OK);
+    let denied = call(
+        &st,
+        "PATCH",
+        &path,
+        Some(&viewer),
+        Some(json!({ "tags": ["x"] })),
+    )
+    .await;
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    let messy = json!({ "tags": [" dmz ", "dmz", ""] });
+    let ok = call(&st, "PATCH", &path, Some(&analyst), Some(messy)).await;
+    assert_eq!(ok.status(), StatusCode::OK);
+    let long = json!({ "tags": ["x".repeat(65)] });
+    let bad = call(&st, "PATCH", &path, Some(&analyst), Some(long)).await;
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
     let anon = call(&st, "GET", "/api/v1/targets", None, None).await;
     assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
 
@@ -84,6 +99,11 @@ async fn targets_manual_add_and_permission_matrix(db: PgPool) {
         .find(|t| t["id"] == id.as_str())
         .unwrap();
     assert_eq!(t["note"], "serwer księgowości");
+    assert_eq!(
+        t["tags"],
+        json!(["dmz"]),
+        "znormalizowane, 400 nic nie zmienia"
+    );
     let raw: Vec<u8> = sqlx::query_scalar("SELECT note_enc FROM targets WHERE id = $1::uuid")
         .bind(&id)
         .fetch_one(&db)

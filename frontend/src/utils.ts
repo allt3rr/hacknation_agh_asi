@@ -1,4 +1,4 @@
-import type { Coverage, FileFormat, Run, RunStatus } from "./types";
+import type { Coverage, FileFormat, Run, RunStatus, ScheduleEntry, ScheduleWindow } from "./types";
 
 /** Klasy przycisku drugorzędnego (obramowany, bez tła). */
 export const BTN_SECONDARY = "border border-line bg-surface px-2.5 py-1 text-fg shadow-none hover:border-accent hover:text-accent";
@@ -109,4 +109,20 @@ if (import.meta.env.DEV) {
   console.assert(eq(toggleAll(s("x", "a"), ["a", "b"]), ["x", "a", "b"]), "toggleAll: częściowe → wszystkie");
   console.assert(eq(toggleAll(s("x", "a", "b"), ["a", "b"]), ["x"]), "toggleAll: wszystkie → odznacza tylko wyniki");
   console.assert(eq(toggleAll(s("x"), []), ["x"]), "toggleAll: puste wyniki bez zmian");
+}
+
+const DAY_LABELS: Record<string, string> = { mon: "pn", tue: "wt", wed: "śr", thu: "cz", fri: "pt", sat: "sb", sun: "nd" };
+
+/** Okna pozycji harmonogramu jednym ciągiem; brak okien = „bez ograniczeń”. */
+export function formatWindows(windows: ScheduleWindow[]): string {
+  if (!windows.length) return "bez ograniczeń";
+  return windows.map((w) => `${w.days.length ? w.days.map((d) => DAY_LABELS[d] ?? d).join(",") : "codziennie"} ${w.start}–${w.end}`).join("; ");
+}
+
+/** Najwcześniejszy kolejny start pozycji jak w `is_due`: start jej ostatniego przebiegu + N h (okna mogą go przesunąć). */
+export function nextScheduledStart(s: ScheduleEntry, now = Date.now()): string {
+  if (!s.enabled) return "wyłączona";
+  if (!s.last_run_at || s.last_status === "partial" || s.last_status === "failed") return "przy najbliższym sprawdzeniu";
+  const at = new Date(s.last_run_at).getTime() + s.every_hours * 3_600_000;
+  return at > now ? formatDate(new Date(at).toISOString()) : "przy najbliższym sprawdzeniu";
 }

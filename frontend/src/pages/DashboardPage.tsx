@@ -1,16 +1,18 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Card } from "../components/Card";
-import { ChangeTable } from "../components/ChangeTable";
 import { DataTable } from "../components/DataTable";
 import { ScanProgress } from "../components/ScanProgress";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
-import type { Dashboard, Run, Session } from "../types";
-import { BADGE, BTN_SECONDARY, STATUS_LABELS, formatDate, formatDuration } from "../utils";
+import type { Dashboard, Run, ScheduleEntry, Session } from "../types";
+import { BADGE, BTN_SECONDARY, STATUS_LABELS, formatDate, formatDuration, formatWindows, nextScheduledStart } from "../utils";
 
 const REFRESH_MS = 1000;
 const HISTORY_RUNS = 10;
+// shortcut: „od początku” w porze startu obejmuje maks. 500 ostatnich przebiegów (limit API); przy większej historii agregować w backendzie.
+const RUNS_LIMIT = 500;
+const loadRuns = () => api.runs.list(RUNS_LIMIT);
 
 const CATEGORY_LABELS: Record<string, string> = {
   admin_panel: "panel admina",
@@ -21,7 +23,8 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 export function DashboardPage({ session }: { session: Session }) {
   const { data, error, reload } = useApiData(api.dashboard);
-  const { data: runs, reload: reloadRuns } = useApiData(api.runs.list);
+  const { data: runs, reload: reloadRuns } = useApiData(loadRuns);
+  const { data: schedules, reload: reloadSchedule } = useApiData(api.schedules.list);
   const { run } = useNotice();
   const active = runs?.find((r) => r.status === "running");
   const scanRunning = (data?.scan_running ?? false) || active !== undefined;
@@ -54,6 +57,7 @@ export function DashboardPage({ session }: { session: Session }) {
   const refresh = () => {
     reload();
     reloadRuns();
+    reloadSchedule();
   };
   const cancel = (r: Run) =>
     run(async () => {
@@ -69,7 +73,7 @@ export function DashboardPage({ session }: { session: Session }) {
 
       <KpiBar dashboard={data} onRefresh={refresh} />
 
-      <div className="grid gap-3 xl:grid-cols-2">
+      <div className="grid gap-x-3 xl:grid-cols-2">
         <Card title={`Najważniejsze znaleziska (${data.notable.length})`}>
           <DataTable
             label="Najważniejsze znaleziska"
@@ -87,34 +91,15 @@ export function DashboardPage({ session }: { session: Session }) {
           />
         </Card>
 
-        <Card title={`Zmiany w ostatnim przebiegu (${data.recent_changes.length}/${data.changes_total})`}>
-          <ChangeTable changes={data.recent_changes} label="Zmiany w ostatnim przebiegu" />
+        <Card title="Zaplanowane przebiegi">
+          {schedules ? <ScheduleSummary schedules={schedules} /> : <p className="text-muted">Ładowanie...</p>}
         </Card>
-      </div>
 
-      <div className="grid gap-3 xl:grid-cols-2">
-        {finished.length > 1 && (
-          <Card title="Historia przebiegów">
-            <RunHistory runs={finished.slice(0, HISTORY_RUNS)} />
-          </Card>
-        )}
-        <Card title="Technologie">
-          <DataTable
-            label="Technologie"
-            columns={[
-              { header: "Technologia", render: (t) => t.name },
-              { header: "Kategoria", title: (t) => t.category, render: (t) => <span className={BADGE}>{t.category}</span> },
-              { header: "Usługi", mono: true, render: (t) => t.services },
-            ]}
-            rows={data.technologies}
-            rowKey={(t) => `${t.name}-${t.category}`}
-          />
+        <Card title="Historia przebiegów">
+          <RunHistory runs={finished.slice(0, HISTORY_RUNS)} />
         </Card>
-        {finished.length > 1 && (
-          <Card title="Pora startu skanu">
-            <TimeOfDay runs={finished} />
-          </Card>
-        )}
+
+        <TimeOfDayCard runs={finished} />
       </div>
     </>
   );
@@ -122,29 +107,30 @@ export function DashboardPage({ session }: { session: Session }) {
 
 const TONES = { green: "text-green", orange: "text-orange", red: "text-red", muted: "text-muted", fg: "text-fg" } as const;
 
+/** Udział niestabilnych; niezerowy udział poniżej 1% to „<1%”, nie mylące „0%”. */
+function unstablePercent(unstable: number, hosts: number): string {
+  if (!hosts) return "—";
+  const pct = (unstable / hosts) * 100;
+  return unstable > 0 && pct < 1 ? "<1%" : `${Math.round(pct)}%`;
+}
+
 /** Zwarty pasek metryk: jeden wiersz `dl`, każda wartość ucinana w swojej kolumnie. */
 function KpiBar({ dashboard: d, onRefresh }: { dashboard: Dashboard; onRefresh: () => void }) {
-  const run = d.latest_run;
-  const items: { term: string; value: string | number; tone?: keyof typeof TONES; title?: string }[] = [
-    { term: "cele", value: d.targets },
-    { term: "hosty aktywne", value: d.assets.active ?? 0, tone: "green" },
-    { term: "niestabilne", value: d.assets.unstable ?? 0, tone: d.assets.unstable ? "orange" : "muted" },
-    { term: "nieaktywne", value: d.assets.inactive ?? 0, tone: "muted" },
+  const active = d.assets.active ?? 0;
+  const unstable = d.assets.unstable ?? 0;
+  const hosts = active + unstable + (d.assets.inactive ?? 0);
+  const items: { term: string; value: string | number; tone?: keyof typeof TONES }[] = [
+    { term: "hosty aktywne", value: active, tone: "green" },
+    { term: "hosty niestabilne", value: unstable, tone: unstable ? "orange" : "muted" },
+    { term: "% niestabilnych", value: unstablePercent(unstable, hosts), tone: unstable ? "orange" : "muted" },
     { term: "usługi", value: d.services },
-    { term: "zmiany", value: d.changes_total, tone: d.changes_total ? "orange" : "muted" },
-    {
-      term: "ostatni przebieg",
-      value: run ? `${STATUS_LABELS[run.status] ?? run.status} · ${formatDate(run.started_at ?? run.created_at)}` : "brak",
-      tone: run?.status === "failed" ? "red" : run?.status === "partial" ? "orange" : "fg",
-      title: run ? `${STATUS_LABELS[run.status] ?? run.status}, ${formatDate(run.started_at ?? run.created_at)}, czas ${formatDuration(run.duration_ms)}` : undefined,
-    },
-    { term: "czas", value: run ? formatDuration(run.duration_ms) : "—" },
+    { term: "skany", value: d.scans_total },
   ];
   return (
     <div className="panel mb-3 flex items-stretch">
       <dl className="grid min-w-0 flex-1 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))]">
         {items.map((i) => (
-          <div key={i.term} className="min-w-0 border-r border-b border-line px-3 py-1.5" title={i.title ?? `${i.term}: ${i.value}`}>
+          <div key={i.term} className="min-w-0 border-r border-b border-line px-3 py-1.5" title={`${i.term}: ${i.value}`}>
             <dt className="truncate text-[11px] tracking-wide text-muted uppercase">{i.term}</dt>
             <dd className={`mono truncate text-base font-semibold ${TONES[i.tone ?? "fg"]}`}>{i.value}</dd>
           </div>
@@ -157,30 +143,86 @@ function KpiBar({ dashboard: d, onRefresh }: { dashboard: Dashboard; onRefresh: 
   );
 }
 
-/** Tabela z paskami: liczby są w tekście, pasek tylko ilustruje skalę (dostępne bez wzroku). */
+/** Pozycje harmonogramu tylko do odczytu; edycja w Skany → Harmonogram. */
+function ScheduleSummary({ schedules }: { schedules: ScheduleEntry[] }) {
+  return (
+    <DataTable
+      label="Pozycje harmonogramu"
+      rows={schedules}
+      rowKey={(s) => s.id}
+      emptyText="brak pozycji harmonogramu"
+      columns={[
+        { header: "Pozycja", render: (s) => s.name },
+        { header: "Cele", mono: true, render: (s) => s.target_ids.length - s.missing_targets },
+        { header: "Częstotliwość", render: (s) => `co ${s.every_hours} h` },
+        { header: "Okna (UTC)", title: (s) => formatWindows(s.windows), render: (s) => formatWindows(s.windows) },
+        {
+          header: "Następny start (najwcześniej)",
+          render: (s) => <span className={s.enabled ? "mono" : "text-muted"}>{nextScheduledStart(s)}</span>,
+        },
+      ]}
+    />
+  );
+}
+
+/** Liczba podatności z progami koloru; „—”, gdy sprawdzenie nie zostało zakończone. */
+function VulnCount({ run: r }: { run: Run }) {
+  if (r.vuln_state !== "done") return <span className="text-muted">—</span>;
+  const n = r.vuln_summary.vulnerabilities ?? 0;
+  return <span className={`mono font-semibold ${n === 0 ? "text-green" : n <= 2 ? "text-orange" : "text-red"}`}>{n}</span>;
+}
+
 function RunHistory({ runs }: { runs: Run[] }) {
-  const maxHosts = Math.max(1, ...runs.map((r) => r.coverage.live_hosts ?? 0));
   return (
     <DataTable
       label="Kolejne skany"
       rows={runs}
       rowKey={(r) => r.id}
+      emptyText="Brak zakończonych skanów"
       columns={[
         { header: "Skan", mono: true, render: (r) => formatDate(r.started_at ?? r.created_at) },
         { header: "Status", render: (r) => STATUS_LABELS[r.status] ?? r.status },
-        {
-          header: "Hosty aktywne",
-          render: (r) => (
-            <div className="flex items-center gap-2">
-              <span className="mono w-10 text-right">{r.coverage.live_hosts ?? 0}</span>
-              <span aria-hidden="true" className="h-2 rounded-sm bg-accent" style={{ width: `${((r.coverage.live_hosts ?? 0) / maxHosts) * 160}px` }} />
-            </div>
-          ),
-        },
+        { header: "Hosty aktywne", mono: true, render: (r) => r.coverage.live_hosts ?? 0 },
         { header: "Usługi", render: (r) => r.coverage.services ?? "" },
+        { header: "Podatności", render: (r) => <VulnCount run={r} /> },
         { header: "Czas trwania", render: (r) => formatDuration(r.duration_ms) },
       ]}
     />
+  );
+}
+
+const RANGES: [string, number | null][] = [
+  ["7 dni", 7],
+  ["31 dni", 31],
+  ["365 dni", 365],
+  ["od początku", null],
+];
+
+function TimeOfDayCard({ runs }: { runs: Run[] }) {
+  const [days, setDays] = useState<number | null>(null);
+  const since = days === null ? -Infinity : Date.now() - days * 86_400_000;
+  const inRange = runs.filter((r) => new Date(r.started_at ?? r.created_at).getTime() >= since);
+  return (
+    <Card
+      title="Czas działania skanów"
+      actions={
+        <div role="group" aria-label="Zakres" className="flex flex-wrap gap-1">
+          {RANGES.map(([label, value]) => (
+            <button
+              key={label}
+              type="button"
+              aria-pressed={days === value}
+              className={days === value ? "border border-accent" : BTN_SECONDARY}
+              onClick={() => setDays(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      }
+    >
+      <TimeOfDay runs={inRange} />
+    </Card>
   );
 }
 

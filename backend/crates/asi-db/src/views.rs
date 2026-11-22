@@ -125,11 +125,16 @@ pub async fn dashboard(db: &PgPool) -> Result<Value> {
         sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM scan_runs WHERE status = 'running')")
             .fetch_one(db)
             .await?;
+    let scans_total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM scan_runs WHERE kind = 'scan' AND status IN ('done', 'partial')",
+    )
+    .fetch_one(db)
+    .await?;
 
     let Some(run) = latest else {
         return Ok(
             json!({ "targets": targets, "assets": assets_map(assets), "latest_run": null, "scan_running": running,
-                          "services": 0, "changes_total": 0, "technologies": [], "notable": [], "recent_changes": [] }),
+                          "scans_total": scans_total, "services": 0, "changes_total": 0, "technologies": [], "notable": [], "recent_changes": [] }),
         );
     };
     let services: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM observations WHERE run_id = $1")
@@ -158,6 +163,7 @@ pub async fn dashboard(db: &PgPool) -> Result<Value> {
         "assets": assets_map(assets),
         "latest_run": run,
         "scan_running": running,
+        "scans_total": scans_total,
         "services": services,
         "changes_total": changes_total,
         "technologies": technologies.into_iter().map(|(n, c, k)| json!({ "name": n, "category": c, "services": k })).collect::<Vec<_>>(),

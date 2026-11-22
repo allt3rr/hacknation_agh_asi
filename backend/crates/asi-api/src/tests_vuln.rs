@@ -723,11 +723,6 @@ async fn active_verification_respects_window_and_failures(db: PgPool) {
     let mut cfg = config(&nvd, VulnMode::Ask);
     cfg.vuln.verify = true;
     cfg.vuln.nuclei_binary = "nuclei-nie-istnieje".into();
-    cfg.schedule.windows = vec![asi_scanner::config::WindowConfig {
-        start: "22:00".into(),
-        end: "06:00".into(),
-        days: vec![],
-    }];
     let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../signatures"));
     let noon = || {
         time::PrimitiveDateTime::parse(
@@ -746,6 +741,20 @@ async fn active_verification_respects_window_and_failures(db: PgPool) {
     );
     let editor = as_role(&st, &db, "ed", rbac::EDITOR).await;
     let run = import(&st, &editor, json!([apache("10.0.0.1")])).await;
+    // przebieg „z harmonogramu”: okna pozycji (22–06) obowiązują też weryfikację aktywną
+    let schedule: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO scan_schedules (name, every_hours, windows, target_ids)
+         VALUES ('noc', 24, '[{\"start\": \"22:00\", \"end\": \"06:00\", \"days\": []}]', '{}') RETURNING id",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE scan_runs SET profile_snapshot = jsonb_build_object('schedule_id', $2::text) WHERE id = $1::uuid")
+        .bind(&run)
+        .bind(schedule.to_string())
+        .execute(&db)
+        .await
+        .unwrap();
     let check = format!("/api/v1/runs/{run}/vuln-check");
     assert_eq!(
         call(&st, "POST", &check, Some(&editor), None)
@@ -767,7 +776,10 @@ async fn active_verification_respects_window_and_failures(db: PgPool) {
         .execute(&db)
         .await
         .unwrap();
-    cfg.schedule.windows.clear();
+    sqlx::query("DELETE FROM scan_schedules")
+        .execute(&db)
+        .await
+        .unwrap();
     let st = st.with_scans(ScanService::new(
         Ok(cfg),
         AnyRunner::Fake(FakeRunner::default()),

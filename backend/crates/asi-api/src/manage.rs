@@ -179,9 +179,12 @@ pub async fn update_target(
     user: AuthUser,
     ip: ClientIp,
     Path(id): Path<Uuid>,
-    Json(patch): Json<TargetPatch>,
+    Json(mut patch): Json<TargetPatch>,
 ) -> ApiResult<StatusCode> {
     user.require(rbac::TARGETS_UPDATE)?;
+    if let Some(tags) = patch.tags.take() {
+        patch.tags = Some(normalize_tags(tags).map_err(ApiError::BadRequest)?);
+    }
     if !asi_db::targets::update_target(&st.db, &st.crypto, id, &patch).await? {
         return Err(ApiError::NotFound);
     }
@@ -204,6 +207,27 @@ pub async fn update_target(
     )
     .await?;
     Ok(StatusCode::OK)
+}
+
+const MAX_TAGS: usize = 32;
+const MAX_TAG_LEN: usize = 64;
+
+/// Tagi celu: przycięte, bez pustych i duplikatów (kolejność zachowana), z limitem liczby i długości.
+fn normalize_tags(tags: Vec<String>) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for tag in tags {
+        let tag = tag.trim();
+        if tag.chars().count() > MAX_TAG_LEN {
+            return Err(format!("Tag dłuższy niż {MAX_TAG_LEN} znaków"));
+        }
+        if !tag.is_empty() && !out.iter().any(|t| t == tag) {
+            out.push(tag.to_string());
+        }
+    }
+    if out.len() > MAX_TAGS {
+        return Err(format!("Więcej niż {MAX_TAGS} tagów"));
+    }
+    Ok(out)
 }
 
 pub async fn delete_target(

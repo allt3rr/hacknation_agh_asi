@@ -251,7 +251,9 @@ async fn run(st: &AppState, run_id: Uuid) -> anyhow::Result<(Value, Option<Strin
         ));
     }
     if cfg.vuln.verify {
-        match st.scans.window_deadline() {
+        // okna pozycji harmonogramu, która uruchomiła przebieg; po starcie ręcznym bez ograniczeń
+        let windows = asi_db::schedule::windows_for_run(&st.db, run_id).await?;
+        match st.scans.window_deadline(&windows) {
             Err(msg) => notes.push(format!("weryfikacja aktywna pominięta: {msg}")),
             Ok(deadline) => {
                 let scope = scope_for(st, &cfg, &obs).await?;

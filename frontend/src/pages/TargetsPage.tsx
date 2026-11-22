@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "../api";
 import { Card } from "../components/Card";
 import { DataTable } from "../components/DataTable";
 import { FilePicker } from "../components/FilePicker";
+import { TagCombobox, collectTags } from "../components/TagCombobox";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
 import type { ImportSummary, Session, Target } from "../types";
-import { BTN_SECONDARY, fileFormat } from "../utils";
+import { BADGE, BTN_SECONDARY, fileFormat } from "../utils";
 
 const PLACEHOLDER = "10.0.0.0/24\n192.168.1.10\nintranet.example.pl";
 
@@ -21,6 +22,10 @@ export function TargetsPage({ session }: { session: Session }) {
   const { data: targets, error, reload } = useApiData(api.targets.list);
   const { info, run } = useNotice();
   const [text, setText] = useState("");
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const all = useMemo(() => targets ?? [], [targets]);
+  const tags = useMemo(() => collectTags(all), [all]);
+  const rows = tagFilter ? all.filter((t) => t.tags.includes(tagFilter)) : all;
 
   const addManually = () =>
     run(async () => {
@@ -61,13 +66,16 @@ export function TargetsPage({ session }: { session: Session }) {
         </Card>
       )}
 
-      <Card title={`Lista celów (${targets?.length ?? 0})`}>
+      <Card
+        title={tagFilter ? `Lista celów (${rows.length}/${all.length})` : `Lista celów (${all.length})`}
+        actions={<TagCombobox tags={tags} value={tagFilter} onSelect={setTagFilter} label="Filtr: tag" placeholder="wszystkie tagi" clearLabel="wszystkie tagi" />}
+      >
         {error && (
           <p role="alert" className="my-3.5 text-red">
             {error}
           </p>
         )}
-        <TargetTable targets={targets ?? []} session={session} onChanged={reload} run={run} />
+        <TargetTable targets={rows} tags={tags} session={session} onChanged={reload} run={run} />
       </Card>
     </>
   );
@@ -75,12 +83,21 @@ export function TargetsPage({ session }: { session: Session }) {
 
 interface TargetTableProps {
   targets: Target[];
+  /** Wszystkie tagi z listy celów (podpowiedzi w comboboxie). */
+  tags: string[];
   session: Session;
   onChanged: () => Promise<void>;
   run: (action: () => Promise<void>) => Promise<void>;
 }
 
-function TargetTable({ targets, session, onChanged, run }: TargetTableProps) {
+function TargetTable({ targets, tags, session, onChanged, run }: TargetTableProps) {
+  const canTag = can(session, "targets.update");
+  const setTags = (target: Target, next: string[]) =>
+    run(async () => {
+      await api.targets.update(target.id, { tags: next });
+      await onChanged();
+    });
+
   const remove = (target: Target) =>
     run(async () => {
       if (!confirm(`Usunąć cel ${target.value}?`)) return;
@@ -94,10 +111,43 @@ function TargetTable({ targets, session, onChanged, run }: TargetTableProps) {
       rowKey={(t) => t.id}
       label="Lista celów"
       emptyText="Brak celów"
-      filterBy={(t) => `${t.value} ${t.kind}`}
+      filterBy={(t) => `${t.value} ${t.kind} ${t.tags.join(" ")}`}
       columns={[
         { header: "Cel", mono: true, render: (t) => t.value },
         { header: "Typ", render: (t) => (t.excluded ? `${t.kind} · wykluczony` : t.kind) },
+        {
+          header: "Tagi",
+          wrap: true,
+          render: (t) => (
+            <div className="flex flex-wrap items-center gap-1">
+              {t.tags.map((tag) => (
+                <span key={tag} className={`${BADGE} mono`}>
+                  {tag}
+                  {canTag && (
+                    <button
+                      type="button"
+                      className="ml-1 border-0 bg-transparent p-0 text-muted shadow-none hover:text-red"
+                      aria-label={`Usuń tag ${tag} z celu ${t.value}`}
+                      onClick={() => setTags(t, t.tags.filter((x) => x !== tag))}
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
+              ))}
+              {canTag && (
+                <TagCombobox
+                  tags={tags.filter((tag) => !t.tags.includes(tag))}
+                  value={null}
+                  onSelect={(tag) => tag && !t.tags.includes(tag) && setTags(t, [...t.tags, tag])}
+                  label={`Dodaj tag do celu ${t.value}`}
+                  placeholder="+ tag"
+                  allowCreate
+                />
+              )}
+            </div>
+          ),
+        },
         ...(can(session, "targets.delete")
           ? [
               {
