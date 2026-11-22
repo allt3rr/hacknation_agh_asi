@@ -73,6 +73,16 @@ pub async fn recover_orphans(db: &PgPool) -> Result<u64> {
     Ok(res.rows_affected())
 }
 
+/// Czy trwa skan. Planista sprawdza to przed próbą startu, żeby nie trafiać co minutę
+/// w unikalny indeks `scan_runs_one_running` (Postgres loguje każdą taką próbę jako ERROR).
+pub async fn scan_running(db: &PgPool) -> Result<bool> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM scan_runs WHERE kind = 'scan' AND status = 'running')",
+    )
+    .fetch_one(db)
+    .await?)
+}
+
 /// Rezerwuje skan. `None`, gdy w bazie trwa już inny skan z ważną dzierżawą.
 pub async fn reserve_scan(
     db: &PgPool,

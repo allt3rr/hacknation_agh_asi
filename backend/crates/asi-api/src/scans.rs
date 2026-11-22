@@ -425,6 +425,10 @@ pub async fn scheduler(st: AppState) {
 
 /// Jeden obieg planisty: startuje pierwszą należną pozycję, która może ruszyć (w oknie, ma cele).
 pub async fn run_due(st: &AppState) -> anyhow::Result<Option<Uuid>> {
+    // trwa skan: pozycje czekają do kolejnego obiegu (recover_orphans już zwolnił martwe dzierżawy)
+    if runs::scan_running(&st.db).await? {
+        return Ok(None);
+    }
     let all = asi_db::schedule::list(&st.db).await?;
     for s in due_schedules(&all, OffsetDateTime::now_utc()) {
         // usunięty cel nie może dać 400 i zablokować pozycji
