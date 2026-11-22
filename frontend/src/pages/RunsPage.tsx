@@ -9,6 +9,7 @@ import { ScanProgress } from "../components/ScanProgress";
 import { TargetPicker } from "../components/TargetPicker";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
+import { printRunReport } from "../report";
 import type { Change, Page, ResultRow, Run, RunStatus, Session, Target } from "../types";
 import { BTN_SECONDARY, STATUS_LABELS, coverageText, downloadBlob, fileFormat, formatDate, formatDuration } from "../utils";
 
@@ -168,6 +169,20 @@ export function RunsPage({ session }: { session: Session }) {
                   </div>
                 );
               },
+            },
+            {
+              header: "Raport",
+              render: (r) => (
+                <button
+                  className={BTN_SECONDARY}
+                  title="Wygeneruj raport w formie pdf"
+                  aria-label={`Wygeneruj raport PDF z przebiegu ${formatDate(r.started_at ?? r.created_at)}`}
+                  disabled={r.status === "running" || r.status === "queued"}
+                  onClick={() => run(() => printRunReport(r, session))}
+                >
+                  Wygeneruj...
+                </button>
+              ),
             },
           ]}
         />
