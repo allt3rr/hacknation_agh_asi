@@ -20,6 +20,29 @@ export const VULN_STATE_LABELS: Record<VulnState, string> = {
   skipped: "pominięte",
 };
 
+export const EVIDENCE_LABELS: Record<Vulnerability["evidence"], { label: string; hint: string; className: string }> = {
+  confirmed: {
+    label: "potwierdzona",
+    hint: "Potwierdzona aktywnie nieinwazyjnym szablonem CVE (nuclei)",
+    className: "text-red font-medium",
+  },
+  version_match: {
+    label: "dokładna wersja",
+    hint: "Wersja upstream usługi mieści się w zakresie podatnych wersji w NVD; wymaga potwierdzenia",
+    className: "",
+  },
+  version_backport: {
+    label: "pakiet dystrybucji",
+    hint: "Wersja pakietu dystrybucji (np. Ubuntu, Debian, RHEL): poprawka mogła zostać przeniesiona wstecz — sprawdź wersję pakietu",
+    className: "text-muted",
+  },
+  version_conditional: {
+    label: "warunkowa",
+    hint: "CVE dotyczy tylko konfiguracji z innym komponentem (np. system, moduł) — szczegóły w opisie",
+    className: "text-muted",
+  },
+};
+
 /** Podatności przebiegu: CVE, CVSS, severity, usługa, poziom dowodu. */
 export function VulnTable({ rows, label }: { rows: Vulnerability[]; label: string }) {
   return (
@@ -54,11 +77,8 @@ export function VulnTable({ rows, label }: { rows: Vulnerability[]; label: strin
         { header: "Komponent", render: (v) => `${v.component} ${v.version}` },
         {
           header: "Dowód",
-          render: (v) => (v.evidence === "confirmed" ? "potwierdzona" : "korelacja wersji"),
-          title: (v) =>
-            v.evidence === "confirmed"
-              ? "Potwierdzona nieinwazyjnym szablonem CVE"
-              : "Wersja usługi pasuje do CVE w NVD; wymaga potwierdzenia (możliwe poprawki wsteczne)",
+          render: (v) => <span className={EVIDENCE_LABELS[v.evidence].className}>{EVIDENCE_LABELS[v.evidence].label}</span>,
+          title: (v) => EVIDENCE_LABELS[v.evidence].hint,
         },
         { header: "Opis", wrap: true, render: (v) => v.description },
       ]}

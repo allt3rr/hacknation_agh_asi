@@ -3,10 +3,9 @@
 
 use anyhow::{bail, Context, Result};
 use asi_core::model::Observation;
-use asi_core::vuln::{
-    severity_from_cvss, CveInfo, ServiceId, Vulnerability, EVIDENCE_VERSION_MATCH,
-};
+use asi_core::vuln::{severity_from_cvss, version_evidence, CveInfo, ServiceId, Vulnerability};
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
@@ -63,7 +62,7 @@ impl NvdClient {
 
     async fn page(&self, cpe: &str, start: u64) -> Result<Value> {
         let url = format!(
-            "{}?cpeName={}&isVulnerable&resultsPerPage={PAGE}&startIndex={start}",
+            "{}?cpeName={}&isVulnerable&noRejected&resultsPerPage={PAGE}&startIndex={start}",
             self.base,
             encode(cpe)
         );
@@ -98,13 +97,13 @@ impl NvdClient {
         bail!("{last_err} (po {ATTEMPTS} próbach)")
     }
 
-    /// Wszystkie CVE, w których konfiguracji ten CPE jest podatny.
+    /// Wszystkie CVE, w których konfiguracji ten CPE jest podatny (bez wycofanych).
     pub async fn cves_for(&self, cpe: &str) -> Result<Vec<CveInfo>> {
         let mut out = Vec::new();
         let mut start = 0;
         loop {
             let page = self.page(cpe, start).await?;
-            let items = parse_response(&page);
+            let items = parse_response(&page, cpe);
             let total = page["totalResults"].as_u64().unwrap_or(0);
             let got = page["vulnerabilities"].as_array().map_or(0, Vec::len) as u64;
             out.extend(items);
@@ -150,8 +149,48 @@ fn cvss_v3(metrics: &Value) -> (Option<f64>, Option<String>) {
     (None, None)
 }
 
-/// Odpowiedź NVD CVE API 2.0 → lista CVE z CVSS v3.x (brak oceny = `None`).
-pub fn parse_response(v: &Value) -> Vec<CveInfo> {
+/// `dostawca:produkt` z CPE 2.3 (`cpe:2.3:a:apache:http_server:...` → `apache:http_server`).
+fn vendor_product(cpe: &str) -> Option<String> {
+    let p: Vec<&str> = cpe.split(':').collect();
+    (p.len() > 4).then(|| format!("{}:{}", p[3], p[4]))
+}
+
+/// Czy węzeł konfiguracji ma podatny wpis dla `dostawca:produkt`.
+fn node_has(node: &Value, vp: &str) -> bool {
+    node["cpeMatch"].as_array().into_iter().flatten().any(|m| {
+        m["vulnerable"].as_bool().unwrap_or(false)
+            && m["criteria"].as_str().and_then(vendor_product).as_deref() == Some(vp)
+    })
+}
+
+/// Komponenty wymagane obok usługi: gdy każda konfiguracja CVE z tym produktem to AND z innymi
+/// węzłami (np. „Apache na Windows”), zwraca ich `dostawca:produkt`. Pusta lista = CVE dotyczy
+/// samego produktu w tej wersji.
+fn requirements(cve: &Value, vp: &str) -> Vec<String> {
+    let mut required = BTreeSet::new();
+    for cfg in cve["configurations"].as_array().into_iter().flatten() {
+        let nodes: Vec<&Value> = cfg["nodes"].as_array().into_iter().flatten().collect();
+        if !nodes.iter().any(|n| node_has(n, vp)) {
+            continue;
+        }
+        if cfg["operator"] != "AND" || nodes.len() < 2 {
+            return vec![];
+        }
+        for n in nodes.into_iter().filter(|n| !node_has(n, vp)) {
+            for m in n["cpeMatch"].as_array().into_iter().flatten() {
+                if let Some(other) = m["criteria"].as_str().and_then(vendor_product) {
+                    required.insert(other);
+                }
+            }
+        }
+    }
+    required.into_iter().collect()
+}
+
+/// Odpowiedź NVD CVE API 2.0 dla zapytania o `cpe` → lista CVE z CVSS v3.x (brak oceny = `None`)
+/// i wymaganiami konfiguracji.
+pub fn parse_response(v: &Value, cpe: &str) -> Vec<CveInfo> {
+    let vp = vendor_product(cpe).unwrap_or_default();
     v["vulnerabilities"]
         .as_array()
         .into_iter()
@@ -159,6 +198,9 @@ pub fn parse_response(v: &Value) -> Vec<CveInfo> {
         .filter_map(|item| {
             let cve = &item["cve"];
             let id = cve["id"].as_str()?.to_string();
+            if cve["vulnStatus"] == "Rejected" {
+                return None;
+            }
             let descriptions = cve["descriptions"].as_array();
             let description = descriptions
                 .and_then(|d| d.iter().find(|d| d["lang"] == "en").or(d.first()))
@@ -174,12 +216,13 @@ pub fn parse_response(v: &Value) -> Vec<CveInfo> {
                 published: cve["published"]
                     .as_str()
                     .map(|p| p.chars().take(10).collect()),
+                requires: requirements(cve, &vp),
             })
         })
         .collect()
 }
 
-/// Podatności usługi z dopasowanych CVE (dowód: korelacja wersji).
+/// Podatności usługi z dopasowanych CVE. Dowód zależy od pewności dopasowania (`version_evidence`).
 pub fn correlate(o: &Observation, id: &ServiceId, cves: &[CveInfo]) -> Vec<Vulnerability> {
     cves.iter()
         .map(|c| Vulnerability {
@@ -190,10 +233,18 @@ pub fn correlate(o: &Observation, id: &ServiceId, cves: &[CveInfo]) -> Vec<Vulne
             cvss_score: c.cvss_score,
             cvss_vector: c.cvss_vector.clone(),
             severity: severity_from_cvss(c.cvss_score).into(),
-            evidence: EVIDENCE_VERSION_MATCH.into(),
+            evidence: version_evidence(id, c).into(),
             component: id.product.clone(),
             version: id.version.clone(),
-            description: c.description.clone(),
+            description: if c.requires.is_empty() {
+                c.description.clone()
+            } else {
+                format!(
+                    "Dotyczy tylko konfiguracji z: {}. {}",
+                    c.requires.join(", "),
+                    c.description
+                )
+            },
             published: c.published.clone(),
         })
         .collect()
@@ -212,7 +263,10 @@ mod tests {
 
     #[test]
     fn parses_nvd_fixture() {
-        let cves = parse_response(&serde_json::from_str(FIXTURE).unwrap());
+        let cves = parse_response(
+            &serde_json::from_str(FIXTURE).unwrap(),
+            "cpe:2.3:a:apache:http_server:2.4.49:*:*:*:*:*:*:*",
+        );
         assert_eq!(cves.len(), 3);
         assert_eq!(cves[0].id, "CVE-2021-41773");
         assert_eq!(
@@ -234,11 +288,50 @@ mod tests {
             cpe: "x".into(),
             product: "http_server".into(),
             version: "2.4.49".into(),
+            backport: false,
         };
         let v = correlate(&o, &id, &cves);
         assert_eq!(v[1].severity, "Critical");
         assert_eq!(v[2].severity, "Info");
         assert!(v.iter().all(|v| v.evidence == "version_match"));
+    }
+
+    #[test]
+    fn configuration_requirements_and_rejected() {
+        let apache = |vulnerable: bool| {
+            serde_json::json!({ "vulnerable": vulnerable,
+                "criteria": "cpe:2.3:a:apache:http_server:*:*:*:*:*:*:*:*" })
+        };
+        let windows = serde_json::json!({ "vulnerable": false,
+            "criteria": "cpe:2.3:o:microsoft:windows:-:*:*:*:*:*:*:*" });
+        let page = serde_json::json!({ "vulnerabilities": [
+            { "cve": { "id": "CVE-PLAIN", "configurations": [
+                { "nodes": [{ "operator": "OR", "cpeMatch": [apache(true)] }] }] } },
+            { "cve": { "id": "CVE-WIN", "configurations": [
+                { "operator": "AND", "nodes": [
+                    { "operator": "OR", "cpeMatch": [apache(true)] },
+                    { "operator": "OR", "cpeMatch": [windows] }] }] } },
+            { "cve": { "id": "CVE-GONE", "vulnStatus": "Rejected" } },
+        ]});
+        let cves = parse_response(&page, "cpe:2.3:a:apache:http_server:2.4.49:*:*:*:*:*:*:*");
+        assert_eq!(cves.len(), 2, "wycofane CVE pominięte");
+        assert!(cves[0].requires.is_empty());
+        assert_eq!(cves[1].requires, vec!["microsoft:windows".to_string()]);
+
+        let id = ServiceId {
+            cpe: "x".into(),
+            product: "http_server".into(),
+            version: "2.4.49".into(),
+            backport: false,
+        };
+        let v = correlate(
+            &Observation::new("10.0.0.1".into(), 80, "tcp".into()),
+            &id,
+            &cves,
+        );
+        assert_eq!(v[0].evidence, "version_match");
+        assert_eq!(v[1].evidence, "version_conditional");
+        assert!(v[1].description.contains("microsoft:windows"));
     }
 
     async fn mock(
@@ -285,6 +378,7 @@ mod tests {
         let q = queries.lock().unwrap()[0].clone();
         assert!(q.contains(&format!("cpeName={cpe}")), "{q}");
         assert!(q.contains("isVulnerable"), "{q}");
+        assert!(q.contains("noRejected"), "{q}");
     }
 
     #[tokio::test]

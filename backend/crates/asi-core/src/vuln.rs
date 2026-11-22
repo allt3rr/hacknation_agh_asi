@@ -3,8 +3,12 @@
 use crate::model::Observation;
 use serde::{Deserialize, Serialize};
 
-pub const EVIDENCE_VERSION_MATCH: &str = "version_match";
+/// Poziomy dowodu, od najmocniejszego: potwierdzona sondą → dokładna wersja → wersja pakietu
+/// dystrybucji (poprawka mogła zostać przeniesiona wstecz) → podatna tylko w określonej konfiguracji.
 pub const EVIDENCE_CONFIRMED: &str = "confirmed";
+pub const EVIDENCE_VERSION_MATCH: &str = "version_match";
+pub const EVIDENCE_BACKPORT: &str = "version_backport";
+pub const EVIDENCE_CONDITIONAL: &str = "version_conditional";
 
 /// CVE z bazy (NVD) przed dopasowaniem do usługi.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -14,6 +18,9 @@ pub struct CveInfo {
     pub cvss_vector: Option<String>,
     pub description: String,
     pub published: Option<String>,
+    /// Inne komponenty (`dostawca:produkt`), bez których CVE nie dotyczy usługi (konfiguracja AND w NVD).
+    #[serde(default)]
+    pub requires: Vec<String>,
 }
 
 /// Podatność usługi w przebiegu.
@@ -26,7 +33,7 @@ pub struct Vulnerability {
     pub cvss_score: Option<f64>,
     pub cvss_vector: Option<String>,
     pub severity: String,
-    /// `version_match` (korelacja wersji) albo `confirmed` (potwierdzona sondą).
+    /// Jeden z `EVIDENCE_*`.
     pub evidence: String,
     pub component: String,
     pub version: String,
@@ -58,6 +65,59 @@ pub struct ServiceId {
     pub cpe: String,
     pub product: String,
     pub version: String,
+    /// Pakiet dystrybucji (np. „8.9p1 Ubuntu 3ubuntu0.6”): wersja upstream nie mówi o poprawkach.
+    pub backport: bool,
+}
+
+/// Nazwy dostawców z nmap, które NVD zastąpiło innymi (stare CPE nie trafiają w konfiguracje CVE).
+const VENDOR_RENAMES: &[((&str, &str), &str)] = &[
+    (("igor_sysoev", "nginx"), "f5"),
+    (("nginx", "nginx"), "f5"),
+    (("mysql", "mysql"), "oracle"),
+];
+
+/// Ślady pakietu dystrybucji w wersji lub dodatkowym opisie usługi z nmap.
+const DISTRO_MARKERS: &[&str] = &[
+    "ubuntu",
+    "debian",
+    "raspbian",
+    "centos",
+    "red hat",
+    "rhel",
+    ".el",
+    "fedora",
+    "suse",
+    "alpine",
+    "amzn",
+    "amazon linux",
+];
+
+fn is_distro_build(o: &Observation) -> bool {
+    [o.version.as_deref(), o.extra_info.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(str::to_ascii_lowercase)
+        .any(|s| DISTRO_MARKERS.iter().any(|m| s.contains(m)))
+}
+
+/// CPE 2.3 z wersją. OpenSSH: „8.9p1” → wersja „8.9” i update „p1”, jak w słowniku NVD.
+fn cpe23(vendor: &str, product: &str, version: &str) -> String {
+    let vendor = VENDOR_RENAMES
+        .iter()
+        .find(|((v, p), _)| *v == vendor && *p == product)
+        .map_or(vendor, |(_, to)| to);
+    let (ver, update) = match version.split_once('p') {
+        Some((v, u))
+            if product == "openssh"
+                && !v.is_empty()
+                && u.chars().all(|c| c.is_ascii_digit())
+                && !u.is_empty() =>
+        {
+            (v, format!("p{u}"))
+        }
+        _ => (version, "*".to_string()),
+    };
+    format!("cpe:2.3:a:{vendor}:{product}:{ver}:{update}:*:*:*:*:*:*")
 }
 
 /// (fragment nazwy produktu małymi literami, dostawca, produkt w CPE).
@@ -98,53 +158,73 @@ fn clean_version(v: &str) -> String {
     }
 }
 
-fn from_alias(name: &str, version: &str) -> Option<ServiceId> {
+fn service(vendor: &str, product: &str, version: String, backport: bool) -> ServiceId {
+    ServiceId {
+        cpe: cpe23(vendor, product, &version),
+        product: product.into(),
+        version,
+        backport,
+    }
+}
+
+fn from_alias(name: &str, version: &str, backport: bool) -> Option<ServiceId> {
     let version = clean_version(version);
     if version.is_empty() {
         return None;
     }
     let lower = name.to_ascii_lowercase();
     let (_, vendor, product) = ALIASES.iter().find(|(frag, _, _)| lower.contains(frag))?;
-    Some(ServiceId {
-        cpe: format!("cpe:2.3:a:{vendor}:{product}:{version}:*:*:*:*:*:*:*"),
-        product: (*product).into(),
-        version,
-    })
+    Some(service(vendor, product, version, backport))
 }
 
-/// CPE 2.2 URI z nmap (`cpe:/a:apache:http_server:2.4.49`) → CPE 2.3 z wersją.
-/// `None`, gdy to nie jest aplikacja (`a`) albo brakuje wersji.
-fn from_nmap_cpe(cpe: &str) -> Option<ServiceId> {
+/// CPE 2.2 URI z nmap (`cpe:/a:apache:http_server:2.4.49`) → CPE 2.3 z wersją. Gdy CPE nie ma
+/// wersji, bierze wersję usługi z nmap (dostawca i produkt z CPE są pewniejsze niż aliasy).
+/// `None`, gdy to nie jest aplikacja (`a`) albo wersji nie ma nigdzie.
+fn from_nmap_cpe(cpe: &str, service_version: Option<&str>, backport: bool) -> Option<ServiceId> {
     let rest = cpe.strip_prefix("cpe:/a:")?;
     let mut parts = rest.split(':');
     let (vendor, product) = (parts.next()?, parts.next()?);
-    let version = clean_version(parts.next().unwrap_or(""));
+    let mut version = clean_version(parts.next().unwrap_or(""));
+    if version.is_empty() {
+        version = clean_version(service_version.unwrap_or(""));
+    }
     if vendor.is_empty() || product.is_empty() || version.is_empty() {
         return None;
     }
-    Some(ServiceId {
-        cpe: format!("cpe:2.3:a:{vendor}:{product}:{version}:*:*:*:*:*:*:*"),
-        product: product.into(),
-        version,
-    })
+    Some(service(vendor, product, version, backport))
 }
 
-/// Co działa pod tym portem: CPE z nmap → produkt i wersja z nmap → technologia z wersją.
+/// Co działa pod tym portem: CPE z nmap → produkt i wersja z nmap → technologia z wersją
+/// (sygnatury HTTP, np. wersja CMS z meta generatora).
 pub fn identify(o: &Observation) -> Option<ServiceId> {
+    let backport = is_distro_build(o);
     o.cpe
         .iter()
-        .find_map(|c| from_nmap_cpe(c))
+        .find_map(|c| from_nmap_cpe(c, o.version.as_deref(), backport))
         .or_else(|| {
             o.product
                 .as_deref()
                 .zip(o.version.as_deref())
-                .and_then(|(p, v)| from_alias(p, v))
+                .and_then(|(p, v)| from_alias(p, v, backport))
         })
         .or_else(|| {
-            o.detections
-                .iter()
-                .find_map(|d| d.version.as_deref().and_then(|v| from_alias(&d.name, v)))
+            o.detections.iter().find_map(|d| {
+                d.version
+                    .as_deref()
+                    .and_then(|v| from_alias(&d.name, v, false))
+            })
         })
+}
+
+/// Poziom dowodu korelacji wersji: warunkowa konfiguracja jest najsłabsza, potem pakiet dystrybucji.
+pub fn version_evidence(id: &ServiceId, cve: &CveInfo) -> &'static str {
+    if !cve.requires.is_empty() {
+        EVIDENCE_CONDITIONAL
+    } else if id.backport {
+        EVIDENCE_BACKPORT
+    } else {
+        EVIDENCE_VERSION_MATCH
+    }
 }
 
 #[cfg(test)]
@@ -194,10 +274,10 @@ mod tests {
         let mut o = obs();
         o.product = Some("OpenSSH".into());
         o.version = Some("8.9p1 Ubuntu 3".into());
-        assert_eq!(
-            identify(&o).unwrap().cpe,
-            "cpe:2.3:a:openbsd:openssh:8.9p1:*:*:*:*:*:*:*"
-        );
+        let id = identify(&o).unwrap();
+        assert_eq!(id.cpe, "cpe:2.3:a:openbsd:openssh:8.9:p1:*:*:*:*:*:*");
+        assert_eq!(id.version, "8.9p1");
+        assert!(id.backport, "pakiet Ubuntu");
 
         let mut o = obs();
         o.detections.push(Detection {
@@ -212,6 +292,45 @@ mod tests {
             identify(&o).unwrap().cpe,
             "cpe:2.3:a:wordpress:wordpress:6.4.1:*:*:*:*:*:*:*"
         );
+    }
+
+    #[test]
+    fn nmap_cpe_without_version_uses_service_version_and_current_vendor() {
+        let mut o = obs();
+        o.cpe = vec!["cpe:/a:igor_sysoev:nginx".into()];
+        o.product = Some("nginx".into());
+        o.version = Some("1.18.0".into());
+        o.extra_info = Some("Ubuntu".into());
+        let id = identify(&o).unwrap();
+        assert_eq!(id.cpe, "cpe:2.3:a:f5:nginx:1.18.0:*:*:*:*:*:*:*");
+        assert!(id.backport);
+
+        let mut o = obs();
+        o.cpe = vec!["cpe:/a:apache:http_server:2.4.49".into()];
+        assert!(!identify(&o).unwrap().backport, "wersja upstream");
+    }
+
+    #[test]
+    fn evidence_levels() {
+        let mut id = ServiceId {
+            cpe: "x".into(),
+            product: "http_server".into(),
+            version: "2.4.49".into(),
+            backport: false,
+        };
+        let mut cve = CveInfo {
+            id: "CVE-1".into(),
+            cvss_score: None,
+            cvss_vector: None,
+            description: String::new(),
+            published: None,
+            requires: vec![],
+        };
+        assert_eq!(version_evidence(&id, &cve), EVIDENCE_VERSION_MATCH);
+        id.backport = true;
+        assert_eq!(version_evidence(&id, &cve), EVIDENCE_BACKPORT);
+        cve.requires = vec!["microsoft:windows".into()];
+        assert_eq!(version_evidence(&id, &cve), EVIDENCE_CONDITIONAL);
     }
 
     #[test]

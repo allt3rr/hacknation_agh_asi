@@ -716,3 +716,77 @@ async fn defectdojo_push_waits_for_cve_decision(db: PgPool) {
         "{export}"
     );
 }
+
+#[sqlx::test(migrator = "asi_db::MIGRATOR")]
+async fn active_verification_respects_window_and_failures(db: PgPool) {
+    let (nvd, _) = mock_nvd(false).await;
+    let mut cfg = config(&nvd, VulnMode::Ask);
+    cfg.vuln.verify = true;
+    cfg.vuln.nuclei_binary = "nuclei-nie-istnieje".into();
+    cfg.schedule.windows = vec![asi_scanner::config::WindowConfig {
+        start: "22:00".into(),
+        end: "06:00".into(),
+        days: vec![],
+    }];
+    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../signatures"));
+    let noon = || {
+        time::PrimitiveDateTime::parse(
+            "2026-11-21 12:00:00",
+            time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]"),
+        )
+        .ok()
+    };
+    let st = prepared(&db).await.with_scans(
+        ScanService::new(
+            Ok(cfg.clone()),
+            AnyRunner::Fake(FakeRunner::default()),
+            dir.clone(),
+        )
+        .with_clock(Arc::new(noon)),
+    );
+    let editor = as_role(&st, &db, "ed", rbac::EDITOR).await;
+    let run = import(&st, &editor, json!([apache("10.0.0.1")])).await;
+    let check = format!("/api/v1/runs/{run}/vuln-check");
+    assert_eq!(
+        call(&st, "POST", &check, Some(&editor), None)
+            .await
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let r = wait_state(&st, &editor, &run, &["done", "failed"]).await;
+    assert_eq!(r["vuln_state"], "done", "wynik NVD zostaje: {r}");
+    assert!(
+        r["vuln_reason"].as_str().unwrap().contains("pominięta"),
+        "poza oknem nuclei nie startuje: {r}"
+    );
+    assert_eq!(r["vuln_summary"]["version_match"], 3);
+    assert_eq!(r["vuln_summary"]["confirmed"], 0);
+
+    // w oknie (bez ograniczeń) brak nuclei to uwaga, nie błąd sprawdzania; usługa musi być w zakresie
+    sqlx::query("INSERT INTO targets (kind, value, source) VALUES ('ip', '10.0.0.1', 'manual')")
+        .execute(&db)
+        .await
+        .unwrap();
+    cfg.schedule.windows.clear();
+    let st = st.with_scans(ScanService::new(
+        Ok(cfg),
+        AnyRunner::Fake(FakeRunner::default()),
+        dir,
+    ));
+    assert_eq!(
+        call(&st, "POST", &check, Some(&editor), None)
+            .await
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let r = wait_state(&st, &editor, &run, &["done", "failed"]).await;
+    assert_eq!(r["vuln_state"], "done", "{r}");
+    assert!(
+        r["vuln_reason"]
+            .as_str()
+            .unwrap()
+            .contains("weryfikacja aktywna nieudana"),
+        "{r}"
+    );
+}

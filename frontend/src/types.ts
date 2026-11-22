@@ -64,8 +64,13 @@ export interface Run {
   created_at: string;
   vuln_state: VulnState;
   vuln_reason: string | null;
-  /** Po sprawdzeniu: services, identified, unidentified, vulnerabilities, confirmed, verify. */
-  vuln_summary: Partial<Record<"services" | "identified" | "unidentified" | "vulnerabilities" | "confirmed", number>>;
+  /** Po sprawdzeniu: usługi, CVE i ich liczba według dowodu (version_match/backport/conditional od wersji z dowodami). */
+  vuln_summary: Partial<
+    Record<
+      "services" | "identified" | "unidentified" | "vulnerabilities" | "confirmed" | "version_match" | "backport" | "conditional",
+      number
+    >
+  >;
   /** Ostatnia wysyłka do DefectDojo (automatyczna albo ręczna); null = jeszcze nie było. */
   dd_export: DefectDojoExport | null;
 }
@@ -92,8 +97,11 @@ export interface Vulnerability {
   cvss_score: number | null;
   cvss_vector: string | null;
   severity: Severity;
-  /** version_match = korelacja wersji (potencjalna), confirmed = potwierdzona sondą. */
-  evidence: "version_match" | "confirmed";
+  /**
+   * Od najpewniejszego: confirmed = potwierdzona sondą, version_match = dokładna wersja upstream,
+   * version_backport = wersja pakietu dystrybucji, version_conditional = CVE wymaga innego komponentu.
+   */
+  evidence: "confirmed" | "version_match" | "version_backport" | "version_conditional";
   component: string;
   version: string;
   description: string;

@@ -5,16 +5,20 @@
 use crate::scope::Scope;
 use anyhow::{bail, Context, Result};
 use asi_core::model::Observation;
+use asi_core::vuln::severity_from_cvss;
 use serde_json::Value;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::net::IpAddr;
 use std::process::Stdio;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-/// Tagi szablonów, których nigdy nie uruchamiamy.
-pub const EXCLUDED_TAGS: &str = "dos,fuzz,intrusive,bruteforce,oast";
+/// Tagi szablonów, których nigdy nie uruchamiamy: obciążające lub zmieniające stan celu
+/// (wykonanie kodu, wstrzyknięcia SQL, wgrywanie plików, próby logowania, połączenia zwrotne).
+pub const EXCLUDED_TAGS: &str =
+    "dos,fuzz,intrusive,bruteforce,oast,rce,sqli,file-upload,default-login";
 
 #[derive(Debug, Clone)]
 pub struct NucleiOptions {
@@ -49,12 +53,37 @@ impl NucleiOptions {
     }
 }
 
-/// Usługa potwierdzona szablonem CVE.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Usługa potwierdzona szablonem CVE, z oceną z szablonu (gdy CVE nie ma w wyniku NVD).
+#[derive(Debug, Clone, PartialEq)]
 pub struct Hit {
     pub ip: String,
     pub port: u16,
     pub cve_id: String,
+    pub name: String,
+    pub severity: String,
+    pub cvss_score: Option<f64>,
+    pub cvss_vector: Option<String>,
+    pub description: String,
+}
+
+/// Severity: z CVSS szablonu, a bez niego z pola `severity` szablonu.
+fn severity(info: &Value, score: Option<f64>) -> String {
+    if score.is_some() {
+        return severity_from_cvss(score).into();
+    }
+    match info["severity"]
+        .as_str()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "critical" => "Critical",
+        "high" => "High",
+        "medium" => "Medium",
+        "low" => "Low",
+        _ => "Info",
+    }
+    .into()
 }
 
 /// Cele dla nuclei: otwarte usługi przebiegu w zakresie. HTTP jako origin URL, reszta jako `ip:port`.
@@ -127,7 +156,7 @@ fn endpoint(item: &Value) -> Option<(String, u16)> {
 
 /// Wynik JSONL nuclei → potwierdzone CVE na usługach. Linie, których nie da się odczytać, są pomijane.
 pub fn parse_jsonl(out: &str) -> Vec<Hit> {
-    let mut hits = BTreeSet::new();
+    let mut hits = BTreeMap::new();
     for line in out.lines().filter(|l| !l.trim().is_empty()) {
         let Ok(item) = serde_json::from_str::<Value>(line) else {
             continue;
@@ -135,25 +164,55 @@ pub fn parse_jsonl(out: &str) -> Vec<Hit> {
         let Some((ip, port)) = endpoint(&item) else {
             continue;
         };
+        let info = &item["info"];
+        let class = &info["classification"];
+        let score = class["cvss-score"].as_f64();
         for cve_id in cve_ids(&item) {
-            hits.insert(Hit {
-                ip: ip.clone(),
-                port,
-                cve_id,
-            });
+            hits.entry((ip.clone(), port, cve_id.clone()))
+                .or_insert_with(|| Hit {
+                    ip: ip.clone(),
+                    port,
+                    cve_id,
+                    name: info["name"].as_str().unwrap_or("").to_string(),
+                    severity: severity(info, score),
+                    cvss_score: score,
+                    cvss_vector: class["cvss-metrics"].as_str().map(String::from),
+                    description: info["description"]
+                        .as_str()
+                        .unwrap_or("")
+                        .trim()
+                        .to_string(),
+                });
         }
     }
-    hits.into_iter().collect()
+    hits.into_values().collect()
 }
 
-/// Uruchamia nuclei na celach (stdin). `kill_on_drop`: anulowanie zabija proces.
+/// Wynik weryfikacji. `interrupted`: przerwana terminem (koniec okna) albo anulowaniem —
+/// `hits` zawiera trafienia zgłoszone do tej chwili.
+#[derive(Debug, Default)]
+pub struct Outcome {
+    pub hits: Vec<Hit>,
+    pub interrupted: bool,
+}
+
+async fn until(deadline: Option<Instant>) {
+    match deadline {
+        Some(d) => tokio::time::sleep_until(d).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Uruchamia nuclei na celach (stdin). Wynik czytany na bieżąco, więc termin lub anulowanie
+/// zabija proces (`kill_on_drop`), ale zachowuje dotychczasowe trafienia.
 pub async fn run(
     opts: &NucleiOptions,
     targets: &[String],
     token: &CancellationToken,
-) -> Result<Vec<Hit>> {
+    deadline: Option<Instant>,
+) -> Result<Outcome> {
     if targets.is_empty() {
-        return Ok(vec![]);
+        return Ok(Outcome::default());
     }
     let mut child = Command::new(&opts.binary)
         .args(opts.build_args())
@@ -166,26 +225,50 @@ pub async fn run(
     let mut stdin = child.stdin.take().context("brak stdin nuclei")?;
     stdin.write_all(targets.join("\n").as_bytes()).await?;
     drop(stdin);
-    let out = tokio::select! {
-        out = child.wait_with_output() => out?,
-        _ = token.cancelled() => bail!("weryfikacja przerwana"),
-    };
-    if !out.status.success() {
-        bail!(
-            "nuclei zakończyło się kodem {:?}: {}",
-            out.status.code(),
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
+    let mut stderr = child.stderr.take().context("brak stderr nuclei")?;
+    let errors = tokio::spawn(async move {
+        let mut s = String::new();
+        let _ = stderr.read_to_string(&mut s).await;
+        s
+    });
+    let mut lines = BufReader::new(child.stdout.take().context("brak stdout nuclei")?).lines();
+    let mut out = String::new();
+    let mut interrupted = false;
+    loop {
+        tokio::select! {
+            line = lines.next_line() => match line? {
+                Some(l) => {
+                    out.push_str(&l);
+                    out.push('\n');
+                }
+                None => break,
+            },
+            _ = token.cancelled() => { interrupted = true; break }
+            _ = until(deadline) => { interrupted = true; break }
+        }
+    }
+    if interrupted {
+        let _ = child.kill().await;
+    } else {
+        let status = child.wait().await?;
+        if !status.success() {
+            bail!(
+                "nuclei zakończyło się kodem {:?}: {}",
+                status.code(),
+                errors.await.unwrap_or_default().trim()
+            );
+        }
     }
     let allowed: HashSet<(String, u16)> = targets
         .iter()
         .filter_map(|t| endpoint(&serde_json::json!({ "host": t })))
         .collect();
     // odrzuć trafienia spoza listy celów (np. po przekierowaniu)
-    Ok(parse_jsonl(&String::from_utf8_lossy(&out.stdout))
+    let hits = parse_jsonl(&out)
         .into_iter()
         .filter(|h| allowed.contains(&(h.ip.clone(), h.port)))
-        .collect())
+        .collect();
+    Ok(Outcome { hits, interrupted })
 }
 
 #[cfg(test)]
@@ -230,25 +313,57 @@ mod tests {
 
     #[test]
     fn parses_jsonl_hits() {
-        let out = r#"{"template-id":"CVE-2021-41773","info":{"classification":{"cve-id":["cve-2021-41773"]}},"host":"http://172.30.100.11:80","matched-at":"http://172.30.100.11:80/cgi-bin/.%2e/etc/passwd","ip":"172.30.100.11"}
+        let out = r#"{"template-id":"CVE-2021-41773","info":{"name":"Apache 2.4.49 - Path Traversal","severity":"high","description":" Path traversal. ","classification":{"cve-id":["cve-2021-41773"],"cvss-score":7.5,"cvss-metrics":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"}},"host":"http://172.30.100.11:80","matched-at":"http://172.30.100.11:80/cgi-bin/.%2e/etc/passwd","ip":"172.30.100.11"}
 nie-json
 {"template-id":"mysql-detect","info":{},"host":"172.30.100.14:3306"}
-{"template-id":"CVE-2020-1938","info":{},"matched-at":"172.30.100.12:8009"}"#;
+{"template-id":"CVE-2021-41773","info":{"classification":{"cve-id":"CVE-2021-41773"}},"matched-at":"http://172.30.100.11:80/icons/.%2e/x"}
+{"template-id":"CVE-2020-1938","info":{"severity":"critical"},"matched-at":"172.30.100.12:8009"}"#;
+        let hits = parse_jsonl(out);
+        assert_eq!(hits.len(), 2, "duplikat tej samej usługi i CVE scalony");
+        assert_eq!((hits[0].ip.as_str(), hits[0].port), ("172.30.100.11", 80));
+        assert_eq!(hits[0].cve_id, "CVE-2021-41773");
+        assert_eq!(hits[0].severity, "High");
+        assert_eq!(hits[0].cvss_score, Some(7.5));
+        assert_eq!(hits[0].description, "Path traversal.");
+        assert_eq!(hits[0].name, "Apache 2.4.49 - Path Traversal");
         assert_eq!(
-            parse_jsonl(out),
-            vec![
-                Hit {
-                    ip: "172.30.100.11".into(),
-                    port: 80,
-                    cve_id: "CVE-2021-41773".into()
-                },
-                Hit {
-                    ip: "172.30.100.12".into(),
-                    port: 8009,
-                    cve_id: "CVE-2020-1938".into()
-                },
-            ]
+            (hits[1].cve_id.as_str(), hits[1].port),
+            ("CVE-2020-1938", 8009)
         );
+        assert_eq!(hits[1].severity, "Critical", "bez CVSS: severity szablonu");
+        assert_eq!(hits[1].cvss_score, None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn deadline_keeps_hits_reported_so_far() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Duration;
+        let dir = std::env::temp_dir().join(format!("asi-nuclei-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("fake-nuclei");
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\ncat >/dev/null\necho '{\"template-id\":\"CVE-2021-41773\",\"info\":{},\"matched-at\":\"http://10.0.0.1:80/\"}'\nsleep 30\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let opts = NucleiOptions {
+            binary: bin.to_string_lossy().into(),
+            rate_limit: 1,
+        };
+        let started = std::time::Instant::now();
+        let out = run(
+            &opts,
+            &["http://10.0.0.1:80".into()],
+            &CancellationToken::new(),
+            Some(Instant::now() + Duration::from_millis(500)),
+        )
+        .await
+        .unwrap();
+        assert!(out.interrupted);
+        assert_eq!(out.hits.len(), 1, "trafienie sprzed terminu zachowane");
+        assert!(started.elapsed() < Duration::from_secs(5), "proces zabity");
     }
 
     #[tokio::test]
@@ -258,7 +373,9 @@ nie-json
             rate_limit: 1,
         };
         let token = CancellationToken::new();
-        assert!(run(&opts, &["10.0.0.1:80".into()], &token).await.is_err());
-        assert!(run(&opts, &[], &token).await.unwrap().is_empty());
+        assert!(run(&opts, &["10.0.0.1:80".into()], &token, None)
+            .await
+            .is_err());
+        assert!(run(&opts, &[], &token, None).await.unwrap().hits.is_empty());
     }
 }

@@ -45,11 +45,28 @@ same wyniki skanu po **Pomiń** (CVE można sprawdzić później i wysłać przy
 
 
 Sekcja `[vuln]` w pliku konfiguracji skanu: `mode = "ask" | "auto" | "off"` (domyślnie `ask`, nadpisywane przy
-starcie skanu), `verify` (nuclei), `nvd_url`, `cache_hours`, `verify_rate`. Korelacja wersji ma dowód
-`version_match` (w DefectDojo `verified=false`, możliwe poprawki wsteczne dystrybucji), trafienie szablonu —
-`confirmed` (`verified=true`). Nuclei uruchamiane jest bez szablonów `dos`, `fuzz`, `intrusive`, `bruteforce`,
+starcie skanu), `verify` (nuclei), `nvd_url`, `cache_hours`, `verify_rate`.
+
+Każda podatność ma poziom dowodu (lista sortowana od najpewniejszych):
+
+| Dowód | Kiedy | DefectDojo |
+|---|---|---|
+| `confirmed` | trafienie nieinwazyjnego szablonu CVE nuclei; CVE spoza wyniku NVD też trafia na listę (ocena z szablonu) | `verified=true` |
+| `version_match` | dokładna wersja upstream mieści się w podatnych wersjach NVD | `verified=false` |
+| `version_backport` | wersja pakietu dystrybucji (Ubuntu, Debian, RHEL…): poprawka mogła zostać przeniesiona wstecz | `verified=false` |
+| `version_conditional` | CVE w NVD dotyczy produktu tylko razem z innym komponentem (konfiguracja AND, np. „na Windows”) — wymagany komponent jest w opisie | `verified=false` |
+
+Identyfikacja usług pod NVD: CPE z nmap (z wersją usługi, gdy CPE jej nie ma), poprawiony dostawca dla nazw
+zastąpionych w NVD (`igor_sysoev:nginx` → `f5:nginx`, `mysql:mysql` → `oracle:mysql`), wersje OpenSSH w formacie
+słownika NVD (`8.9p1` → wersja `8.9`, update `p1`), CVE wycofane (`Rejected`) są pomijane. Brak odpowiedzi NVD
+dla części usług nie przerywa sprawdzania (uwaga w wyniku); bez żadnej odpowiedzi sprawdzanie kończy się błędem.
+
+Nuclei uruchamiane jest tylko z szablonami `cve`, bez tagów `dos`, `fuzz`, `intrusive`, `bruteforce`, `oast`,
+`rce`, `sqli`, `file-upload`, `default-login` (nic, co wykonuje kod, modyfikuje dane albo próbuje logowania),
 bez OOB (`-ni`), z limitem `verify_rate` i tylko na usługach przebiegu w aktualnym zakresie celów i portów.
-Usługi oznaczone jako `false_positive` nie mają podatności na liście ani w DefectDojo.
+Respektuje okno czasowe harmonogramu: poza oknem weryfikacja jest pomijana, a na końcu okna przerywana
+(trafienia sprzed przerwania zostają). Usługi oznaczone jako `false_positive` nie mają podatności na liście
+ani w DefectDojo.
 
 ## Praca lokalna bez Dockera
 

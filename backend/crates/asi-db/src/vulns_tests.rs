@@ -95,13 +95,25 @@ async fn store_confirm_and_list(db: PgPool) {
     assert_eq!(all[2].severity, "Info");
     assert_eq!(all[0], items[1]);
 
-    let n = vulns::confirm(&db, id, &[("10.0.0.1".into(), 80, "CVE-2021-41773".into())])
-        .await
-        .unwrap();
-    assert_eq!(n, 1);
+    // potwierdzenie podnosi dowód (ocena NVD zostaje), CVE spoza NVD jest dodawane
+    let mut known = vuln("10.0.0.1", "CVE-2021-41773", Some(1.0));
+    known.description = "z szablonu".into();
+    let extra = vuln("10.0.0.3", "CVE-2020-1938", Some(9.8));
+    let n = vulns::confirm(&db, id, &[known, extra]).await.unwrap();
+    assert_eq!(n, 2);
     let high = vulns::list(&db, id, Some("High"), None).await.unwrap();
     assert_eq!(high.len(), 1);
     assert_eq!(high[0].evidence, "confirmed");
+    assert_eq!(high[0].cvss_score, Some(7.5), "ocena NVD zachowana");
+    assert_eq!(high[0].description, "opis");
+    let added = vulns::list(&db, id, None, Some("10.0.0.3")).await.unwrap();
+    assert_eq!(added[0].evidence, "confirmed");
+    for evidence in ["version_backport", "version_conditional"] {
+        let mut v = vuln("10.0.0.4", "CVE-2099-0002", None);
+        v.evidence = evidence.into();
+        vulns::replace(&db, id, &[v]).await.expect(evidence);
+    }
+    vulns::replace(&db, id, &items).await.unwrap();
     assert_eq!(
         vulns::list(&db, id, None, Some("10.0.0.2"))
             .await

@@ -31,8 +31,9 @@ max_chunk_attempts = 3
 
 # Podatności po opublikowanym przebiegu: korelacja usług (nmap -sV / technologie z wersją) z CVE w NVD
 # i ocena CVSS. mode: "ask" (pytanie w interfejsie), "auto" (od razu) albo "off" (tylko ręcznie).
-# verify = true: dodatkowo nieinwazyjne szablony CVE nuclei (bez DoS/fuzz/intrusive/OOB), tylko na
-# usługach przebiegu w zakresie celów i portów. Klucz NVD (wyższy limit): zmienna ASI_NVD_API_KEY.
+# verify = true: dodatkowo nieinwazyjne szablony CVE nuclei (bez DoS/fuzz/intrusive/OOB/RCE/SQLi/logowania),
+# tylko na usługach przebiegu w zakresie celów i portów i tylko w oknie czasowym harmonogramu. Potwierdza
+# CVE z NVD i dodaje te, których korelacja wersji nie znalazła. Klucz NVD (wyższy limit): ASI_NVD_API_KEY.
 [vuln]
 mode = "ask"
 verify = false

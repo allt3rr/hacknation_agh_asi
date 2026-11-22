@@ -73,6 +73,24 @@ impl ScanService {
         *self.schedule.write().unwrap() = schedule;
     }
 
+    /// Termin z okna czasowego: `None` = bez ograniczeń, `Err` = poza oknem albo błędne okno.
+    /// Wspólny dla skanu i aktywnej weryfikacji podatności (obie generują ruch do celów).
+    pub fn window_deadline(&self) -> Result<Option<Instant>, String> {
+        let windows = self
+            .schedule()
+            .windows()
+            .map_err(|e| format!("Błędne okno czasowe: {e:#}"))?;
+        let now = (self.clock)().ok_or("Nieznany czas lokalny")?;
+        match window_decision(&windows, now) {
+            WindowDecision::Unrestricted => Ok(None),
+            WindowDecision::Closed => Err("Poza dozwolonym oknem czasowym skanu".into()),
+            WindowDecision::Until(end) => {
+                let left = std::time::Duration::try_from(end - now).unwrap_or_default();
+                Ok(Some(Instant::now() + left))
+            }
+        }
+    }
+
     pub fn with_clock(mut self, clock: Clock) -> Self {
         self.clock = clock;
         self
@@ -115,23 +133,7 @@ pub async fn start_run(
         .cfg
         .clone()
         .map_err(|e| StartError::Refused(format!("Błędna konfiguracja skanu: {e}")))?;
-    let windows = svc
-        .schedule()
-        .windows()
-        .map_err(|e| StartError::Refused(format!("Błędne okno czasowe: {e:#}")))?;
-    let now = (svc.clock)().ok_or_else(|| StartError::Refused("Nieznany czas lokalny".into()))?;
-    let deadline = match window_decision(&windows, now) {
-        WindowDecision::Unrestricted => None,
-        WindowDecision::Closed => {
-            return Err(StartError::Refused(
-                "Poza dozwolonym oknem czasowym skanu".into(),
-            ))
-        }
-        WindowDecision::Until(end) => {
-            let left = std::time::Duration::try_from(end - now).unwrap_or_default();
-            Some(Instant::now() + left)
-        }
-    };
+    let deadline = svc.window_deadline().map_err(StartError::Refused)?;
 
     let targets = load_targets(st, selection).await?;
     let expanded =

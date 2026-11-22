@@ -270,6 +270,9 @@ export function RunsPage({ session }: { session: Session }) {
                   {r.vuln_state === "done" && (
                     <div className="text-muted">
                       CVE: {r.vuln_summary.vulnerabilities ?? 0}, potwierdzone: {r.vuln_summary.confirmed ?? 0}
+                      {/* podział według dowodu tylko dla sprawdzeń, które go zapisały */}
+                      {r.vuln_summary.version_match !== undefined &&
+                        `, dokładna wersja: ${r.vuln_summary.version_match}, niepewne: ${(r.vuln_summary.backport ?? 0) + (r.vuln_summary.conditional ?? 0)}`}
                     </div>
                   )}
                   {r.vuln_reason && <div className="text-muted">{r.vuln_reason}</div>}

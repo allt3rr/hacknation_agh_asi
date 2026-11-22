@@ -9,7 +9,10 @@ use crate::{ApiError, ApiResult, AppState};
 use anyhow::{anyhow, Context};
 use asi_core::model::Observation;
 use asi_core::rbac;
-use asi_core::vuln::{identify, CveInfo, ServiceId, Vulnerability, EVIDENCE_CONFIRMED};
+use asi_core::vuln::{
+    identify, CveInfo, ServiceId, Vulnerability, EVIDENCE_BACKPORT, EVIDENCE_CONDITIONAL,
+    EVIDENCE_CONFIRMED, EVIDENCE_VERSION_MATCH,
+};
 use asi_db::audit::{self, Entry};
 use asi_db::vulns::{self, Transition};
 use asi_db::{overrides, runs, views};
@@ -126,13 +129,18 @@ async fn scope_for(st: &AppState, cfg: &ScanConfig, obs: &[Observation]) -> anyh
     Ok(scope)
 }
 
+/// Wersja wpisu cache: zmiana parsowania odpowiedzi NVD (np. wymagania konfiguracji) unieważnia
+/// stare wpisy bez migracji.
+const CACHE_VERSION: &str = "v2";
+
 async fn cves(
     st: &AppState,
     client: &NvdClient,
     cfg: &ScanConfig,
     cpe: &str,
 ) -> anyhow::Result<Vec<CveInfo>> {
-    if let Some(cached) = vulns::cache_get(&st.db, cpe, cfg.vuln.cache_hours).await? {
+    let key = format!("{CACHE_VERSION}|{cpe}");
+    if let Some(cached) = vulns::cache_get(&st.db, &key, cfg.vuln.cache_hours).await? {
         if let Ok(items) = serde_json::from_value(cached) {
             return Ok(items);
         }
@@ -141,11 +149,55 @@ async fn cves(
         .cves_for(cpe)
         .await
         .with_context(|| format!("CVE dla {cpe}"))?;
-    vulns::cache_put(&st.db, cpe, &serde_json::to_value(&items)?).await?;
+    vulns::cache_put(&st.db, &key, &serde_json::to_value(&items)?).await?;
     Ok(items)
 }
 
-/// Sprawdzanie. Zwraca podsumowanie i ewentualną uwagę (np. nieudana weryfikacja aktywna).
+/// Trafienie nuclei jako podatność usługi: komponent i wersja z obserwacji (gdy znane),
+/// ocena i opis z szablonu.
+fn hit_to_vuln(h: nuclei::Hit, obs: &[Observation]) -> Vulnerability {
+    let o = obs.iter().find(|o| o.ip == h.ip && o.port == h.port);
+    let id = o.and_then(identify);
+    let component = id
+        .as_ref()
+        .map(|i| i.product.clone())
+        .or_else(|| o.and_then(|o| o.product.clone()))
+        .unwrap_or_else(|| h.name.clone());
+    let version = id
+        .map(|i| i.version)
+        .or_else(|| o.and_then(|o| o.version.clone()))
+        .unwrap_or_default();
+    Vulnerability {
+        ip: h.ip,
+        port: h.port,
+        proto: o.map_or_else(|| "tcp".into(), |o| o.proto.clone()),
+        cve_id: h.cve_id,
+        cvss_score: h.cvss_score,
+        cvss_vector: h.cvss_vector,
+        severity: h.severity,
+        evidence: EVIDENCE_CONFIRMED.into(),
+        component,
+        version,
+        description: if h.description.is_empty() {
+            h.name
+        } else {
+            h.description
+        },
+        published: None,
+    }
+}
+
+/// Liczba podatności przebiegu według dowodu.
+fn by_evidence(items: &[Vulnerability]) -> BTreeMap<&str, usize> {
+    let mut m = BTreeMap::new();
+    for v in items {
+        *m.entry(v.evidence.as_str()).or_insert(0) += 1;
+    }
+    m
+}
+
+/// Sprawdzanie. Zwraca podsumowanie i ewentualne uwagi (np. częściowy brak danych NVD,
+/// weryfikacja aktywna pominięta poza oknem czasowym).
 async fn run(st: &AppState, run_id: Uuid) -> anyhow::Result<(Value, Option<String>)> {
     let cfg = st
         .scans
@@ -167,48 +219,85 @@ async fn run(st: &AppState, run_id: Uuid) -> anyhow::Result<(Value, Option<Strin
         }
     }
 
+    // błąd NVD dla jednego CPE nie przekreśla reszty; bez żadnej odpowiedzi sprawdzanie się nie udaje
     let key = std::env::var("ASI_NVD_API_KEY").ok();
     let client = NvdClient::new(&cfg.vuln.nvd_url, key)?;
     let mut found: Vec<Vulnerability> = Vec::new();
+    let mut nvd_failed: Vec<anyhow::Error> = Vec::new();
     for (cpe, items) in &services {
-        let list = cves(st, &client, &cfg, cpe).await?;
-        for (o, id) in items {
-            found.extend(asi_vuln::correlate(o, id, &list));
+        match cves(st, &client, &cfg, cpe).await {
+            Ok(list) => {
+                for (o, id) in items {
+                    found.extend(asi_vuln::correlate(o, id, &list));
+                }
+            }
+            Err(e) => {
+                tracing::warn!(%run_id, error = %format!("{e:#}"), "NVD: brak danych dla usługi");
+                nvd_failed.push(e);
+            }
         }
+    }
+    if !services.is_empty() && nvd_failed.len() == services.len() {
+        return Err(nvd_failed.remove(0));
     }
     vulns::replace(&st.db, run_id, &found).await?;
 
-    let mut note = None;
-    let mut confirmed = 0;
+    let mut notes = Vec::new();
+    if let Some(e) = nvd_failed.first() {
+        notes.push(format!(
+            "NVD bez odpowiedzi dla {} z {} usług ({e:#})",
+            nvd_failed.len(),
+            services.len()
+        ));
+    }
     if cfg.vuln.verify {
-        let scope = scope_for(st, &cfg, &obs).await?;
-        let targets = nuclei::select_targets(&obs, &scope);
-        let opts = NucleiOptions {
-            binary: cfg.vuln.nuclei_binary.clone(),
-            rate_limit: cfg.vuln.verify_rate,
-        };
-        match nuclei::run(&opts, &targets, &CancellationToken::new()).await {
-            Ok(hits) => {
-                let hits: Vec<_> = hits.into_iter().map(|h| (h.ip, h.port, h.cve_id)).collect();
-                confirmed = vulns::confirm(&st.db, run_id, &hits).await?;
+        match st.scans.window_deadline() {
+            Err(msg) => notes.push(format!("weryfikacja aktywna pominięta: {msg}")),
+            Ok(deadline) => {
+                let scope = scope_for(st, &cfg, &obs).await?;
+                let targets = nuclei::select_targets(&obs, &scope);
+                let opts = NucleiOptions {
+                    binary: cfg.vuln.nuclei_binary.clone(),
+                    rate_limit: cfg.vuln.verify_rate,
+                };
+                match nuclei::run(&opts, &targets, &CancellationToken::new(), deadline).await {
+                    Ok(outcome) => {
+                        if outcome.interrupted {
+                            notes.push(
+                                "weryfikacja aktywna przerwana: koniec okna czasowego".into(),
+                            );
+                        }
+                        let hits: Vec<Vulnerability> = outcome
+                            .hits
+                            .into_iter()
+                            .map(|h| hit_to_vuln(h, &obs))
+                            .collect();
+                        vulns::confirm(&st.db, run_id, &hits).await?;
+                    }
+                    Err(e) => notes.push(format!("weryfikacja aktywna nieudana: {e:#}")),
+                }
             }
-            Err(e) => note = Some(format!("weryfikacja aktywna nieudana: {e:#}")),
         }
     }
 
+    let stored = vulns::list(&st.db, run_id, None, None).await?;
+    let counts = by_evidence(&stored);
+    let count = |k: &str| counts.get(k).copied().unwrap_or(0);
     let summary = json!({
         "services": obs.len(),
         "identified": obs.len() - unidentified,
         "unidentified": unidentified,
         "cpes": services.len(),
-        "vulnerabilities": found.len(),
-        "confirmed": confirmed,
+        "vulnerabilities": stored.len(),
+        "confirmed": count(EVIDENCE_CONFIRMED),
+        "version_match": count(EVIDENCE_VERSION_MATCH),
+        "backport": count(EVIDENCE_BACKPORT),
+        "conditional": count(EVIDENCE_CONDITIONAL),
         "verify": cfg.vuln.verify,
     });
-    Ok((summary, note))
+    Ok((summary, (!notes.is_empty()).then(|| notes.join("; "))))
 }
 
-/// Podatności przebiegu bez usług oznaczonych przez analityka jako `false_positive`.
 pub(crate) async fn visible(
     st: &AppState,
     run_id: Uuid,

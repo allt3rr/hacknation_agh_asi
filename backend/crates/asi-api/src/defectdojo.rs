@@ -8,7 +8,7 @@ use crate::results::{all_rows, record};
 use crate::{ApiError, ApiResult, AppState};
 use asi_core::export::ResultRow;
 use asi_core::rbac;
-use asi_core::vuln::{Vulnerability, EVIDENCE_CONFIRMED};
+use asi_core::vuln::{Vulnerability, EVIDENCE_BACKPORT, EVIDENCE_CONDITIONAL, EVIDENCE_CONFIRMED};
 use axum::extract::{Path, State};
 use axum::Json;
 use reqwest::multipart::{Form, Part};
@@ -124,10 +124,11 @@ pub fn vuln_findings(items: &[Vulnerability]) -> Vec<(String, Value)> {
         .iter()
         .map(|v| {
             let confirmed = v.evidence == EVIDENCE_CONFIRMED;
-            let evidence = if confirmed {
-                "Potwierdzona aktywnie (nieinwazyjny szablon CVE)."
-            } else {
-                "Korelacja wersji z bazą CVE (NVD) — wymaga potwierdzenia, możliwe poprawki wsteczne dystrybucji."
+            let evidence = match v.evidence.as_str() {
+                EVIDENCE_CONFIRMED => "Potwierdzona aktywnie (nieinwazyjny szablon CVE).",
+                EVIDENCE_BACKPORT => "Wersja pakietu dystrybucji zgodna z bazą CVE (NVD) — dystrybucja mogła przenieść poprawkę wstecz, sprawdź wersję pakietu.",
+                EVIDENCE_CONDITIONAL => "Korelacja wersji z bazą CVE (NVD), ale CVE dotyczy tylko konfiguracji z innym komponentem (opis) — wymaga potwierdzenia.",
+                _ => "Dokładna wersja upstream zgodna z bazą CVE (NVD) — wymaga potwierdzenia.",
             };
             let score = match v.cvss_score {
                 Some(s) => format!("CVSS {s}"),
@@ -495,7 +496,16 @@ mod tests {
 
     #[test]
     fn cve_findings_content() {
-        let f = vuln_findings(&[vuln("confirmed", Some(9.8)), vuln("version_match", None)]);
+        let f = vuln_findings(&[
+            vuln("confirmed", Some(9.8)),
+            vuln("version_match", None),
+            vuln("version_backport", None),
+        ]);
+        assert!(f[2].1["description"]
+            .as_str()
+            .unwrap()
+            .contains("pakietu dystrybucji"));
+        assert_eq!(f[2].1["verified"], false);
         let (ip, c) = &f[0];
         assert_eq!(ip, "10.0.0.1");
         assert_eq!(
@@ -515,7 +525,7 @@ mod tests {
         assert!(m["description"]
             .as_str()
             .unwrap()
-            .contains("Korelacja wersji"));
+            .contains("Dokładna wersja"));
         // ten sam identyfikator przy ponownej wysyłce = brak duplikatów w DefectDojo
         assert_eq!(
             vuln_findings(&[vuln("confirmed", Some(9.8))])[0].1["unique_id_from_tool"],

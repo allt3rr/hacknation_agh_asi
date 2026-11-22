@@ -138,22 +138,36 @@ pub async fn replace(db: &PgPool, run_id: Uuid, items: &[Vulnerability]) -> Resu
     Ok(())
 }
 
-/// Podnosi do `confirmed` podatności potwierdzone sondą: (ip, port, CVE). Zwraca liczbę zmienionych.
-pub async fn confirm(db: &PgPool, run_id: Uuid, hits: &[(String, u16, String)]) -> Result<u64> {
+/// Zapisuje podatności potwierdzone sondą (`evidence = confirmed`). Wynik NVD dla tej usługi
+/// i CVE zostaje (ocena i opis NVD mają pierwszeństwo), podnoszony jest tylko dowód; CVE spoza
+/// wyniku NVD jest dodawane z oceną z szablonu. Zwraca liczbę potwierdzonych.
+pub async fn confirm(db: &PgPool, run_id: Uuid, hits: &[Vulnerability]) -> Result<u64> {
+    let mut tx = db.begin().await?;
     let mut n = 0;
-    for (ip, port, cve) in hits {
+    for v in hits {
         n += sqlx::query(
-            "UPDATE vulnerabilities SET evidence = 'confirmed'
-             WHERE run_id = $1 AND ip = $2::inet AND port = $3 AND cve_id = $4",
+            "INSERT INTO vulnerabilities (run_id, ip, port, proto, cve_id, cvss_score, cvss_vector,
+                 severity, evidence, component, version, description, published)
+             VALUES ($1, $2::inet, $3, $4, $5, $6, $7, $8, 'confirmed', $9, $10, $11, $12)
+             ON CONFLICT (run_id, ip, port, proto, cve_id) DO UPDATE SET evidence = 'confirmed'",
         )
         .bind(run_id)
-        .bind(ip)
-        .bind(i32::from(*port))
-        .bind(cve)
-        .execute(db)
+        .bind(&v.ip)
+        .bind(i32::from(v.port))
+        .bind(&v.proto)
+        .bind(&v.cve_id)
+        .bind(v.cvss_score)
+        .bind(&v.cvss_vector)
+        .bind(&v.severity)
+        .bind(&v.component)
+        .bind(&v.version)
+        .bind(&v.description)
+        .bind(&v.published)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
     }
+    tx.commit().await?;
     Ok(n)
 }
 
@@ -172,7 +186,8 @@ type Row = (
     Option<String>,
 );
 
-/// Podatności przebiegu, najgroźniejsze najpierw. Filtry: severity, IP.
+/// Podatności przebiegu: najpierw najpewniejsze (potwierdzone, dokładna wersja), w nich
+/// najgroźniejsze. Filtry: severity, IP.
 pub async fn list(
     db: &PgPool,
     run_id: Uuid,
@@ -184,7 +199,9 @@ pub async fn list(
                 component, version, description, published
          FROM vulnerabilities
          WHERE run_id = $1 AND ($2::text IS NULL OR severity = $2) AND ($3::inet IS NULL OR ip = $3::inet)
-         ORDER BY cvss_score DESC NULLS LAST, ip, port, cve_id",
+         ORDER BY CASE evidence WHEN 'confirmed' THEN 0 WHEN 'version_match' THEN 1
+                                WHEN 'version_backport' THEN 2 ELSE 3 END,
+                  cvss_score DESC NULLS LAST, ip, port, cve_id",
     )
     .bind(run_id)
     .bind(severity)
