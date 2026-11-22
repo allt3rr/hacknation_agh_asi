@@ -58,7 +58,7 @@ DATABASE_URL=postgres://asi:asi@127.0.0.1:5432/asi cargo test
 | GET | `/api/v1/admin/ping` | `admin.users` | endpoint kontrolny macierzy ról (403 dla pozostałych ról) |
 | GET | `/api/v1/targets` | `read` | lista celów (notatka odszyfrowana) |
 | POST | `/api/v1/targets` | `targets.create` | `{text?, targets?: [{value, tags, note}]}` → raport |
-| POST | `/api/v1/targets/import?format=csv,json,text&dry_run=` | `targets.create` | treść pliku → `{rows, accepted, duplicates, rejected[{row, value}], dry_run}` |
+| POST | `/api/v1/targets/import?format=csv,json,text` | `targets.create` | treść pliku → `{rows, accepted, duplicates, rejected[{row, value}]}` |
 | PATCH / DELETE | `/api/v1/targets/{id}` | `targets.update` / `targets.delete` | `{tags?, note?, excluded?}` (pusty `note` usuwa notatkę) |
 | GET / POST | `/api/v1/admin/users` | `admin.users` | lista kont; `{username, password, role}` (hasło ≥ 10 znaków, 409 przy zajętej nazwie) |
 | PATCH / DELETE | `/api/v1/admin/users/{id}` | `admin.users` | `{role?, password?, disabled?}`; zmiana hasła i wyłączenie kończą sesje; 409 dla ostatniego aktywnego admina |

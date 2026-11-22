@@ -14,15 +14,13 @@ function summaryText(s: ImportSummary): string {
   const rejected = s.rejected.length
     ? `, odrzucono ${s.rejected.length}: ${s.rejected.slice(0, 10).map((r) => `${r.value} (wiersz ${r.row})`).join(", ")}`
     : "";
-  const prefix = s.dry_run ? "Sprawdzono plik (nic nie zapisano). Do dodania:" : "Dodano celów:";
-  return `${prefix} ${s.accepted}. Wierszy: ${s.rows}, duplikatów: ${s.duplicates}${rejected}`;
+  return `Dodano celów: ${s.accepted}. Wierszy: ${s.rows}, duplikatów: ${s.duplicates}${rejected}`;
 }
 
 export function TargetsPage({ session }: { session: Session }) {
   const { data: targets, error, reload } = useApiData(api.targets.list);
   const { info, run } = useNotice();
   const [text, setText] = useState("");
-  const [dryRun, setDryRun] = useState(false);
 
   const addManually = () =>
     run(async () => {
@@ -33,7 +31,7 @@ export function TargetsPage({ session }: { session: Session }) {
 
   const importFile = (file: File) =>
     run(async () => {
-      info(summaryText(await api.targets.importFile(fileFormat(file.name), await file.text(), dryRun)));
+      info(summaryText(await api.targets.importFile(fileFormat(file.name), await file.text())));
       await reload();
     });
 
@@ -59,9 +57,6 @@ export function TargetsPage({ session }: { session: Session }) {
               plik CSV/JSON/TXT:
             </span>
             <FilePicker accept=".csv,.json,.txt" label="Plik z celami (CSV, JSON lub TXT)" buttonLabel="Importuj plik" onSubmit={importFile} />
-            <label className="text-muted">
-              <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} /> dry run
-            </label>
           </div>
         </Card>
       )}

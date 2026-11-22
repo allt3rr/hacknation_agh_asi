@@ -45,7 +45,6 @@ pub struct ImportSummary {
     accepted: u64,
     duplicates: usize,
     rejected: Vec<Rejected>,
-    dry_run: bool,
 }
 
 #[derive(Deserialize)]
@@ -69,8 +68,6 @@ pub struct AddTargets {
 pub struct ImportQuery {
     #[serde(default = "default_format")]
     format: String,
-    #[serde(default)]
-    dry_run: bool,
 }
 
 fn default_format() -> String {
@@ -87,33 +84,26 @@ pub async fn list_targets(
     ))
 }
 
-/// Zapisuje (lub tylko liczy przy `dry_run`) cele z raportu. Cele już istniejące w bazie to duplikaty.
+/// Zapisuje cele z raportu. Cele już istniejące w bazie to duplikaty.
 async fn save(
     st: &AppState,
     user: &AuthUser,
     report: ParseReport,
     source: &str,
-    dry_run: bool,
 ) -> ApiResult<ImportSummary> {
-    let new = if dry_run {
-        report.targets.len() as u64
-            - asi_db::targets::count_existing(&st.db, &report.targets).await? as u64
-    } else {
-        asi_db::targets::insert_targets(
-            &st.db,
-            &st.crypto,
-            &report.targets,
-            source,
-            Some(user.0.id),
-        )
-        .await?
-    };
+    let new = asi_db::targets::insert_targets(
+        &st.db,
+        &st.crypto,
+        &report.targets,
+        source,
+        Some(user.0.id),
+    )
+    .await?;
     Ok(ImportSummary {
         rows: report.rows,
         accepted: new,
         duplicates: report.duplicates + (report.targets.len() - new as usize),
         rejected: report.rejected,
-        dry_run,
     })
 }
 
@@ -149,7 +139,7 @@ pub async fn add_targets(
             }),
         }
     }
-    let summary = save(&st, &user, report, "manual", false).await?;
+    let summary = save(&st, &user, report, "manual").await?;
     record(
         &st.db,
         &user,
@@ -178,12 +168,9 @@ pub async fn import_targets(
         "json" => "json",
         _ => "import",
     };
-    let summary = save(&st, &user, report, source, q.dry_run).await?;
-    if !q.dry_run {
-        let details =
-            json!({ "format": source, "rows": summary.rows, "accepted": summary.accepted });
-        record(&st.db, &user, &ip, "target.import", "target", None, details).await?;
-    }
+    let summary = save(&st, &user, report, source).await?;
+    let details = json!({ "format": source, "rows": summary.rows, "accepted": summary.accepted });
+    record(&st.db, &user, &ip, "target.import", "target", None, details).await?;
     Ok(Json(summary))
 }
 

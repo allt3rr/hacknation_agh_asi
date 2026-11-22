@@ -33,7 +33,6 @@ export interface ImportSummary {
   accepted: number;
   duplicates: number;
   rejected: { row: number; value: string }[];
-  dry_run: boolean;
 }
 
 export type RunStatus = "queued" | "running" | "done" | "partial" | "failed" | "cancelled";

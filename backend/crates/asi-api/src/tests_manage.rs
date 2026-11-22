@@ -98,7 +98,7 @@ async fn targets_manual_add_and_permission_matrix(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "asi_db::MIGRATOR")]
-async fn import_organizer_file_dry_run_and_reimport(db: PgPool) {
+async fn import_organizer_file_and_reimport(db: PgPool) {
     use std::fmt::Write as _;
 
     let st = prepared(&db).await;
@@ -124,15 +124,16 @@ async fn import_organizer_file_dry_run_and_reimport(db: PgPool) {
     };
     let n = |v: &serde_json::Value, k: &str| v[k].as_u64().unwrap();
 
-    let dry = body(import(&st, &editor, "format=csv&dry_run=true", data.clone()).await).await;
+    assert_eq!(count(db.clone()).await, 0);
+    let real = body(import(&st, &editor, "format=csv", data.clone()).await).await;
     assert_eq!(
-        (n(&dry, "rows"), n(&dry, "accepted"), n(&dry, "duplicates")),
+        (
+            n(&real, "rows"),
+            n(&real, "accepted"),
+            n(&real, "duplicates")
+        ),
         (10000, 2800, 7200)
     );
-    assert_eq!(count(db.clone()).await, 0);
-
-    let real = body(import(&st, &editor, "format=csv", data.clone()).await).await;
-    assert_eq!((n(&real, "accepted"), n(&real, "duplicates")), (2800, 7200));
     assert!(real["rejected"].as_array().unwrap().is_empty());
     assert_eq!(count(db.clone()).await, 2800);
 

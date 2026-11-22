@@ -94,8 +94,8 @@ export const api = {
   targets: {
     list: () => request<Target[]>("GET", "/targets"),
     addText: (text: string) => request<ImportSummary>("POST", "/targets", { json: { text } }),
-    importFile: (format: FileFormat, content: string, dryRun: boolean) =>
-      request<ImportSummary>("POST", `/targets/import?format=${format}&dry_run=${dryRun}`, { text: content }),
+    importFile: (format: FileFormat, content: string) =>
+      request<ImportSummary>("POST", `/targets/import?format=${format}`, { text: content }),
     update: (id: string, patch: TargetPatch) => request<void>("PATCH", `/targets/${id}`, { json: patch }),
     remove: (id: string) => request<void>("DELETE", `/targets/${id}`),
   },

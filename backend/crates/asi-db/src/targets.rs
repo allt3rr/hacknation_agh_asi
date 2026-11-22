@@ -96,20 +96,6 @@ pub async fn insert_targets(
     Ok(res.rows_affected())
 }
 
-/// Ile z podanych celów już istnieje w bazie (do raportu `dry_run`).
-pub async fn count_existing(db: &PgPool, targets: &[Target]) -> Result<i64> {
-    let kinds: Vec<&str> = targets.iter().map(|t| t.kind.as_str()).collect();
-    let values: Vec<&str> = targets.iter().map(|t| t.value.as_str()).collect();
-    Ok(sqlx::query_scalar(
-        "SELECT COUNT(*) FROM targets t JOIN UNNEST($1::text[], $2::text[]) AS u(kind, value)
-         ON t.kind = u.kind AND t.value = u.value",
-    )
-    .bind(&kinds)
-    .bind(&values)
-    .fetch_one(db)
-    .await?)
-}
-
 pub async fn list_targets(db: &PgPool, crypto: &FieldCrypto) -> Result<Vec<TargetView>> {
     let rows = sqlx::query_as::<_, TargetRow>(
         "SELECT id, kind, value, source, excluded, tags, note_enc, created_at, updated_at
