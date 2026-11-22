@@ -9,7 +9,7 @@ import { can } from "../permissions";
 import type { Dashboard, Run, Session } from "../types";
 import { BADGE, BTN_SECONDARY, STATUS_LABELS, formatDate, formatDuration } from "../utils";
 
-const REFRESH_MS = 5000;
+const REFRESH_MS = 1000;
 const HISTORY_RUNS = 10;
 
 const CATEGORY_LABELS: Record<string, string> = {

@@ -1,7 +1,6 @@
 # ASI backend (PostgreSQL)
 
-Docelowy backend ASI: workspace Cargo na PostgreSQL 16. Zastępuje prototyp z katalogu `src/`
-w repo (SQLite), którego moduły są przenoszone tu w kolejnych zmianach OpenSpec.
+Backend ASI korzysta z PostgreSQL 16.
 
 | Crate | Zakres |
 |---|---|
@@ -67,6 +66,7 @@ DATABASE_URL=postgres://asi:asi@127.0.0.1:5432/asi cargo test
 | POST | `/api/v1/runs` | `scans.run` | start skanu, opcjonalne body `{target_ids: [uuid]}` (tylko te cele; wykluczone pomijane) → 202 `{run_id}`; 400: pusta lista, nieznany cel lub błędne body; 409: trwa skan, poza oknem, błędna konfiguracja, brak celów |
 | GET | `/api/v1/runs`, `/api/v1/runs/{id}` | `read` | status (`running`/`done`/`partial`/`failed`/`cancelled`), powód, pokrycie, czasy |
 | POST | `/api/v1/runs/{id}/cancel` | `scans.run` | przerywa trwający przebieg (wynik nie jest publikowany) |
+| GET | `/api/v1/runs/{id}/report.pdf` | `export` | raport PDF przebiegu do pobrania (A4 poziomo, czcionka Monoid MIT); 404 nieznany, 409 przebieg trwa lub inny eksport w toku |
 | GET | `/api/v1/runs/{id}/observations?limit=&offset=&ip=` | `read` | `{total, items}`: usługi z HTTP, TLS, technologiami i korektami; ciasteczka tylko nazwa + atrybuty |
 | GET | `/api/v1/runs/{id}/changes?limit=&offset=&kind=` | `read` | `{total, items}` (new, gone, changed, host_inactive, host_returned) |
 | GET | `/api/v1/runs/{id}/export?format=json,csv&profile=safe,raw` | `export` | eksport z korektami i `raw_*`; CSV domyślnie bezpieczny dla arkuszy |
@@ -106,8 +106,7 @@ Pełne wartości: tylko `GET /observations/{id}/secrets` z uprawnieniem `results
 
 ## Import CSV
 
-Dwa formaty z nagłówkiem: własny `target,tags,note` (tagi oddzielone `;`) oraz format organizatora
-(`network_addresses_services_10k.csv`): kolumna `ip_address` jest celem, a `subnet_cidr`, `network_zone`
+Dwa formaty z nagłówkiem: własny `target,tags,note` (tagi oddzielone `;`) oraz format organizatora. W drugim formacie kolumna `ip_address` jest celem, a `subnet_cidr`, `network_zone`
 i `hostname` stają się tagami `subnet:…`, `zone:…`, `host:…` — podsieć nie jest rozwijana. Ponowny import
 nie nadpisuje istniejących celów ani ich edycji (liczone jako duplikaty).
 

@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 /// Dzierżawa przedłużana co `HEARTBEAT_SECS`; po `LEASE_SECS` bez odnowienia przebieg jest osierocony.
 pub const LEASE_SECS: i32 = 60;
-pub const HEARTBEAT_SECS: u64 = 10;
+// co sekundę: heartbeat zapisuje też postęp skanu widoczny w UI (jedno UPDATE wiersza na sekundę)
+pub const HEARTBEAT_SECS: u64 = 1;
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct RunView {

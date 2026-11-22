@@ -43,7 +43,7 @@ COPY --from=nuclei /go/bin/nuclei /usr/local/bin/nuclei
 COPY --from=nuclei /nuclei-templates /app/nuclei-templates
 RUN mkdir -p /app/.config /app/.cache && chown asi /app/.config /app/.cache
 COPY --from=frontend /frontend/dist ./ui
-COPY signatures ./signatures
+COPY backend/signatures ./signatures
 COPY backend/config/scan.toml ./config/scan.toml
 
 ENV ASI_BIND=0.0.0.0:8080 \

@@ -99,14 +99,23 @@ async fn targets_manual_add_and_permission_matrix(db: PgPool) {
 
 #[sqlx::test(migrator = "asi_db::MIGRATOR")]
 async fn import_organizer_file_dry_run_and_reimport(db: PgPool) {
+    use std::fmt::Write as _;
+
     let st = prepared(&db).await;
     let editor = logged(&st, &db, "ed", rbac::EDITOR).await;
     let analyst = logged(&st, &db, "an", rbac::ANALYST).await;
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../network_addresses_services_10k.csv"
-    );
-    let data = std::fs::read_to_string(path).expect("plik 10k organizatora");
+    let mut data = String::from("record_id,ip_address,subnet_cidr,hostname,port,network_zone\n");
+    for row in 0..10_000 {
+        let target = row % 2_800;
+        let subnet = 10 + target / 254;
+        let host = 1 + target % 254;
+        let port = 80 + row / 2_800;
+        writeln!(
+            data,
+            "{row},10.10.{subnet}.{host},10.10.{subnet}.0/24,,{port},PROD"
+        )
+        .unwrap();
+    }
     let count = |db: PgPool| async move {
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM targets")
             .fetch_one(&db)

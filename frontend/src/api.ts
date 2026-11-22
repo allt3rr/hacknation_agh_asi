@@ -112,6 +112,12 @@ export const api = {
       const response = await send("GET", `/runs/${id}/export?format=${format}`);
       return response.blob();
     },
+    /** Raport PDF z backendu; nazwa pliku z nagłówka Content-Disposition. */
+    reportPdf: async (id: string) => {
+      const response = await send("GET", `/runs/${id}/report.pdf`);
+      const name = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") ?? "")?.[1] ?? `asi-raport-${id}.pdf`;
+      return { blob: await response.blob(), name };
+    },
     vulnerabilities: (id: string, offset = 0, severity?: Severity) =>
       request<VulnPage>("GET", `/runs/${id}/vulnerabilities?limit=100&offset=${offset}${severity ? `&severity=${severity}` : ""}`),
     startVulnCheck: (id: string) => request<void>("POST", `/runs/${id}/vuln-check`),

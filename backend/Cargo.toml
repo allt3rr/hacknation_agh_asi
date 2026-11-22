@@ -28,6 +28,8 @@ tokio-util = "0.7"
 toml = "0.8"
 url = "2"
 x509-parser = "0.16"
+# raport PDF przebiegu (Apache-2.0 OR MIT); bez obrazów i hyphenacji
+genpdf = { version = "0.2", default-features = false }
 argon2 = "0.5"
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }

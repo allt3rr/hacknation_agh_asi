@@ -317,23 +317,6 @@ mod tests {
     }
 
     #[test]
-    fn organizer_10k_file() {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../network_addresses_services_10k.csv"
-        );
-        let Ok(data) = std::fs::read_to_string(path) else {
-            eprintln!("pominięto: brak {path}");
-            return;
-        };
-        let r = parse_csv(&data).unwrap();
-        assert_eq!(
-            (r.rows, r.targets.len(), r.duplicates, r.rejected.len()),
-            (10000, 2800, 7200, 0)
-        );
-    }
-
-    #[test]
     fn csv_without_target_column_fails() {
         assert!(parse_csv("foo,bar\n1,2\n").is_err());
     }

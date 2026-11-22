@@ -1,2 +1,0 @@
-# Cele labu (profil lab w docker-compose.yml)
-172.30.100.0/27

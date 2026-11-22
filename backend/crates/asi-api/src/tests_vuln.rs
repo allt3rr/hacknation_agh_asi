@@ -143,7 +143,7 @@ fn config(nvd_url: &str, mode: VulnMode) -> ScanConfig {
 }
 
 async fn state_with(db: &PgPool, cfg: ScanConfig, runner: FakeRunner) -> AppState {
-    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../signatures"));
+    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../signatures"));
     prepared(db)
         .await
         .with_scans(ScanService::new(Ok(cfg), AnyRunner::Fake(runner), dir))
@@ -576,7 +576,7 @@ async fn defectdojo_engagement_per_ip(db: PgPool) {
 
 /// Usługa skanu z atrapą nmap odpowiadającą portem `port` (nowy port = nowa usługa = finding).
 fn scans(nvd: &str, port: u16) -> ScanService {
-    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../signatures"));
+    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../signatures"));
     let fake = FakeRunner {
         open_port: port,
         ..Default::default()

@@ -1,2 +1,0 @@
-# Cele dla laboratorium z docker-compose (profil "lab")
-172.30.0.0/28

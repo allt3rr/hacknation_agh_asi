@@ -1,7 +1,7 @@
 import type { Change, ChangeKind } from "../types";
 import { DataTable, type Column } from "./DataTable";
 
-export const KIND_LABELS: Record<ChangeKind, string> = {
+const KIND_LABELS: Record<ChangeKind, string> = {
   new: "nowa",
   gone: "zniknęła",
   changed: "zmiana",

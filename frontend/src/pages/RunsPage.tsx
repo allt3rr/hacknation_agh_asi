@@ -11,7 +11,6 @@ import { TargetPicker } from "../components/TargetPicker";
 import { SEVERITIES, SEVERITY_COLORS, VULN_STATE_LABELS, VulnTable } from "../components/VulnTable";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
-import { printRunReport } from "../report";
 import type { Change, Page, ResultRow, Run, RunStatus, Session, Severity, Target, VulnMode, VulnPage } from "../types";
 import { BTN_SECONDARY, STATUS_LABELS, coverageText, downloadBlob, fileFormat, formatDate, formatDuration } from "../utils";
 
@@ -27,7 +26,7 @@ const STATUS_COLORS: Record<RunStatus, string> = {
 const PAGE_SIZE = 100;
 // bez scans.run lista wyboru nie jest pokazywana, więc nie pobieramy celów (stabilna referencja dla useApiData)
 const noTargets = () => Promise.resolve<Target[]>([]);
-const REFRESH_MS = 5000;
+const REFRESH_MS = 1000;
 // Jak długo po akcji (skan, decyzja o CVE, wysyłka) lista czeka na wynik wysyłki do DefectDojo.
 const EXPORT_WAIT_MS = 2 * 60 * 1000;
 
@@ -142,6 +141,18 @@ export function RunsPage({ session }: { session: Session }) {
     run(async () => setDetails({ kind: "services", run: r, offset, page: await api.runs.observations(r.id, offset) }));
 
   const showChanges = (r: Run) => run(async () => setDetails({ kind: "changes", run: r, page: await api.runs.changes(r.id) }));
+
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null);
+  const downloadReport = (r: Run) =>
+    run(async () => {
+      setPdfBusy(r.id);
+      try {
+        const { blob, name } = await api.runs.reportPdf(r.id);
+        downloadBlob(blob, name);
+      } finally {
+        setPdfBusy(null);
+      }
+    });
 
   const exportRun = (r: Run, format: "csv" | "json") =>
     run(async () => downloadBlob(await api.runs.exportFile(r.id, format), `asi-${r.id}.${format}`));
@@ -304,25 +315,21 @@ export function RunsPage({ session }: { session: Session }) {
                             <button className={BTN_SECONDARY} aria-label={`Eksport przebiegu ${name} do CSV`} onClick={() => exportRun(r, "csv")}>CSV</button>
                           </>
                         )}
+                        <button
+                          className={BTN_SECONDARY}
+                          title="Pobierz raport PDF"
+                          aria-label={`Pobierz raport PDF z przebiegu ${name}`}
+                          aria-busy={pdfBusy === r.id}
+                          disabled={r.status === "queued" || pdfBusy !== null}
+                          onClick={() => downloadReport(r)}
+                        >
+                          {pdfBusy === r.id ? "PDF…" : "PDF"}
+                        </button>
                       </>
                     )}
                   </div>
                 );
               },
-            },
-            {
-              header: "Raport",
-              render: (r) => (
-                <button
-                  className={BTN_SECONDARY}
-                  title="Wygeneruj raport w formie pdf"
-                  aria-label={`Wygeneruj raport PDF z przebiegu ${formatDate(r.started_at ?? r.created_at)}`}
-                  disabled={r.status === "running" || r.status === "queued"}
-                  onClick={() => run(() => printRunReport(r, session))}
-                >
-                  Wygeneruj...
-                </button>
-              ),
             },
           ]}
         />

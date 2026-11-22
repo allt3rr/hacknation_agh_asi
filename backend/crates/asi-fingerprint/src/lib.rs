@@ -459,7 +459,7 @@ mod tests {
 
     #[test]
     fn builtin_signatures_load() {
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../signatures");
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../signatures");
         let set = SignatureSet::new(SignatureSet::load_dir(Path::new(dir)).unwrap()).unwrap();
         assert!(set.len() >= 20);
         assert!(set
