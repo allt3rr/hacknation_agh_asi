@@ -1,126 +1,214 @@
-# ASI: Attack Surface Intelligence
+# Attack Surface Intelligence (ASI)
 
-Narzędzie do cyklicznego, bezpiecznego discovery scanu dużych sieci (powyżej 10 000 adresów IP).
-Wykrywa aktywne hosty, usługi, technologie webowe, CMS-y, panele, nagłówki i ciasteczka, zapisuje
-zmiany między przebiegami, pozwala trwale korygować wyniki, eksportuje JSON/CSV i do DefectDojo.
-Po skanie sprawdza znane podatności usług (CVE z NVD, ocena CVSS, opcjonalne potwierdzenie
-nieinwazyjnymi szablonami nuclei).
-Ma cztery role, szyfrowanie wrażliwych pól i dziennik audytu.
+Narzędzie do cyklicznego, bezpiecznego **discovery scanu** dużych sieci (powyżej 10 000 adresów IP).
+ASI skanuje podane adresy IP, zakresy CIDR i domeny: wykrywa aktywne hosty, otwarte porty i usługi,
+rozpoznaje technologie webowe, a na koniec sprawdza znane podatności (CVE) wykrytych usług.
+Zmiany między przebiegami są zapisywane, a wyniki trafiają do dashboardu, eksportu JSON/CSV/PDF i do DefectDojo.
 
-Backend: Rust ([`backend/`](backend/README.md) — Axum, sqlx, PostgreSQL 16). Frontend: React + TypeScript
-(Vite, `frontend/`). Skanowanie: nmap + własny prober HTTP/TLS.
+![Rust](https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white)
+![Axum](https://img.shields.io/badge/Axum-0.8-6E4A7E)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?logo=tailwindcss&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![nmap](https://img.shields.io/badge/nmap-scanner-4682B4)
+![nuclei](https://img.shields.io/badge/nuclei-v3-orange)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-## Szybki start (Docker)
+## Spis treści
+
+- [O projekcie](#o-projekcie)
+- [Stos technologiczny](#stos-technologiczny)
+- [Funkcjonalności](#funkcjonalności)
+- [Instalacja](#instalacja)
+- [Użycie](#użycie)
+- [Konfiguracja](#konfiguracja)
+- [Role i uprawnienia](#role-i-uprawnienia)
+- [Struktura projektu](#struktura-projektu)
+- [Wymagania zadania a implementacja](#wymagania-zadania-a-implementacja)
+- [Licencja](#licencja)
+
+## O projekcie
+
+Projekt powstał jako odpowiedź na zadanie konkursowe Centrum Bezpieczeństwa Informacji AGH.
+W dużej infrastrukturze część systemów jest widoczna tylko okresowo, a jednorazowy skan nie pokazuje
+pełnej powierzchni ataku. ASI rozwiązuje to przez:
+
+- **cykliczne skany** w zdefiniowanych oknach czasowych, z automatycznym wznowieniem w kolejnym oknie,
+- **adaptacyjny podział** adresów na podgrupy dobierane do szybkości skanowania,
+- **porównywanie przebiegów** i obsługę hostów niestabilnych (`unstable` → `inactive` po N nieudanych próbach),
+- **bezpieczny fingerprinting** — tylko żądania GET, bez logowania, bez exploitacji.
+
+## Stos technologiczny
+
+| Warstwa | Technologie |
+|---|---|
+| Backend | Rust, Axum 0.8, Tokio, sqlx, clap |
+| Baza danych | PostgreSQL 16 + szyfrowanie pól AES-256-GCM (Encryption at Rest) |
+| Skanowanie | nmap (`-sV`), własny prober HTTP/TLS (reqwest + rustls, x509-parser), nuclei v3 |
+| Podatności | NVD API 2.0 (CVE, CVSS), nieinwazyjne szablony CVE nuclei |
+| Frontend | React 18, TypeScript, Vite, Tailwind CSS 4, Radix UI, cmdk, sonner |
+| Bezpieczeństwo | Argon2id (hasła), sesje w cookie, RBAC, dziennik audytu |
+| Integracje | DefectDojo (Generic Findings Import), eksport JSON/CSV/PDF |
+| Wdrożenie | Docker, Docker Compose |
+
+## Funkcjonalności
+
+### Discovery i identyfikacja usług
+- Wczytywanie celów: adresy IP, zakresy CIDR, domeny — ręcznie lub z pliku **CSV / JSON / TXT**.
+- Wielowątkowy skan nmap z globalnym limitem pakietów/s, adaptacyjnymi podgrupami i pomiarem czasu trwania.
+- Wykrywanie aktywnych hostów, otwartych portów i wersji usług.
+- Kontrola zakresu (`Scope::check`) przed każdym połączeniem — skaner nie wychodzi poza zadane cele i porty.
+
+### Fingerprinting HTTP/HTTPS
+- Tytuł strony, kod odpowiedzi, nagłówki, ciasteczka (z flagami), certyfikat TLS, łańcuch przekierowań.
+- Wykrywanie CMS-ów, frameworków, serwerów aplikacyjnych, urządzeń IoT, paneli administracyjnych i środowisk staging.
+- **Własne sygnatury YAML** (nagłówek, ciasteczko, treść, tytuł, ścieżka, hash favicony, banner, hostname, port).
+- Ocena „ciekawości” (priorytet analityczny) i tagi.
+
+### Analiza zmian
+- Porównanie kolejnych przebiegów: usługi **nowe, znikające i zmienione**.
+- Obsługa hostów niestabilnych — ponowne sprawdzanie brakujących i oznaczanie jako nieaktywne po `inactive_after_misses` przebiegach.
+- **Korekty wyników** (produkt, wersja, status, severity, właściciel, notatka) zachowywane przy kolejnych skanach, z historią i autorem.
+
+### Podatności
+- Korelacja usług z bazą **NVD** (CPE z nmap, normalizacja dostawców i wersji), severity liczone z CVSS.
+- Opcjonalne potwierdzenie szablonami **nuclei** — tylko `cve`, bez `dos`, `fuzz`, `intrusive`, `rce`, `sqli`, `default-login`, OOB.
+- Poziomy dowodu:
+
+| Dowód | Znaczenie |
+|---|---|
+| `confirmed` | trafienie nieinwazyjnego szablonu nuclei |
+| `version_match` | dokładna wersja mieści się w zakresie podatnych wersji NVD |
+| `version_backport` | wersja pakietu dystrybucji — poprawka mogła zostać przeniesiona wstecz |
+| `version_conditional` | CVE dotyczy produktu tylko w połączeniu z innym komponentem |
+
+### Harmonogram, raporty i integracje
+- Harmonogram cyklicznych skanów: cele, częstotliwość, okna czasowe i dni tygodnia — z poziomu interfejsu.
+- Dashboard z licznikami, technologiami, ciekawymi znaleziskami i ostatnimi zmianami.
+- Eksport JSON/CSV (profil `safe` lub `raw`), raport PDF przebiegu, import wyników JSON/CSV.
+- **DefectDojo**: automatyczna wysyłka findingów (engagement `ASI <ip>` per host) oraz ręczna ponowna wysyłka.
+
+### Bezpieczeństwo danych
+- RBAC z czterema rolami, egzekwowany w każdym handlerze API.
+- Szyfrowanie wrażliwych pól AES-256-GCM z AAD per rekord; klucz przechowywany poza wolumenem bazy.
+- Redakcja sekretów (np. `authorization`, `cookie`, tokeny) w odpowiedziach API; pełne wartości tylko dla administratora, z wpisem w audycie.
+- Limit 5 nieudanych logowań na 15 minut.
+
+## Instalacja
+
+### Wymagania wstępne
+
+| Tryb | Wymagania |
+|---|---|
+| Docker (zalecany) | Docker 24+ z Docker Compose |
+| Lokalnie | Rust (stable), Node.js 24, PostgreSQL 16, `nmap` w `PATH`, opcjonalnie `nuclei` |
+
+### Szybki start (Docker)
+
+1. Skopiuj plik środowiskowy i ustaw hasła:
+
+   ```bash
+   cp .env.example .env
+   # ASI_ADMIN_PASSWORD — hasło pierwszego administratora (min. 10 znaków)
+   # ASI_DB_PASSWORD    — hasło bazy, np. z: openssl rand -hex 32
+   ```
+
+2. Zbuduj i uruchom:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+3. Otwórz **http://127.0.0.1:8080** i zaloguj się jako `admin`.
+
+Compose uruchamia trzy usługi:
+- `db` — PostgreSQL 16,
+- `keygen` — jednorazowo generuje klucz szyfrowania w osobnym wolumenie `asi-keys`,
+- `asi` — backend z nmap, nuclei i zbudowanym interfejsem.
+
+> Konto `admin` tworzone jest wyłącznie na pustej bazie. Hasła kolejnych kont zmienia się w zakładce **Użytkownicy**.
+
+### Uruchomienie lokalne (bez Dockera)
 
 ```bash
-# W pliku .env ustaw ASI_ADMIN_PASSWORD (minimum 10 znaków)
-# oraz ASI_DB_PASSWORD (np. osobne losowe hasło z openssl rand -hex 32).
-docker compose up -d --build            # http://127.0.0.1:8080
-```
+# 1. Baza danych
+docker run -d --name asi-pg -e POSTGRES_USER=asi -e POSTGRES_PASSWORD=asi -e POSTGRES_DB=asi \
+  -p 127.0.0.1:5432:5432 postgres:16-alpine
 
-Compose uruchamia: `db` (PostgreSQL 16), `keygen` (jednorazowo tworzy klucz szyfrowania w osobnym
-wolumenie `asi-keys`, nie w wolumenie bazy) i `asi` (backend ze skanerem nmap i interfejsem pod tym
-samym adresem). Konto `admin` powstaje z hasłem startowym wyłącznie na pustej bazie.
-W istniejącym wdrożeniu ustaw ASI_DB_PASSWORD zgodnie z aktualnym hasłem roli PostgreSQL.
-Rotację hasła bazy skoordynuj ze zmianą hasła tej roli. Hasło konta aplikacji zmienisz w zakładce Użytkownicy.
-
-| Zmienna | Domyślnie | Opis |
-|---|---|---|
-| `ASI_ADMIN_PASSWORD` | wymagane przy pierwszym starcie | hasło pierwszego administratora |
-| `ASI_PORT` | `8080` | port na `127.0.0.1` |
-| `ASI_PROJECT` | `asi` | nazwa projektu compose (np. drugi egzemplarz obok) |
-| `ASI_DB_PASSWORD` | wymagane | hasło bazy |
-| `ASI_SCAN_CONFIG` | `backend/config/scan.toml` | plik konfiguracji skanu (porty, limity, okna czasowe) |
-| `ASI_SESSION_TTL_HOURS`, `ASI_COOKIE_SECURE` | `12`, `false` | sesja; `true` za HTTPS |
-| `ASI_DD_URL`, `ASI_DD_TOKEN`, `ASI_DD_PRODUCT` | — | DefectDojo (id produktu w `ASI_DD_PRODUCT`): wyniki są wysyłane automatycznie po decyzji o CVE: po zatwierdzonym sprawdzaniu info z opisem CVE (po jego zakończeniu), po odrzuceniu lub w trybie `off` samo info; błąd tylko w logu. Po sprawdzeniu CVE przycisk **CVE → DefectDojo** w tabeli Przebiegi wysyła je ponownie (`POST /api/v1/runs/{id}/defectdojo`). Każdy IP ma własny engagement `ASI <ip>` w statusie „In Progress”: istniejący jest używany ponownie, brakujący tworzony. DefectDojo na hoście: `http://host.docker.internal:8081`. `ASI_DD_ENGAGEMENT` nie jest już używane |
-| `ASI_NVD_API_KEY` | — | opcjonalny klucz NVD API (wyższy limit zapytań przy sprawdzaniu podatności) |
-
-## Sprawdzanie podatności
-
-Po zakończonym skanie (tryb „zapytaj”) pojawia się pytanie **Sprawdzić podatności?**. Po akceptacji ASI ustala
-produkt i wersję usług (nmap `-sV`, technologie), pobiera CVE z NVD i liczy severity z CVSS; przy `verify = true`
-potwierdza je nieinwazyjnymi szablonami nuclei. Wynik: przycisk **CVE** w tabeli Przebiegi. Do DefectDojo
-(engagement per IP) wyniki trafiają automatycznie po tej decyzji: z opisem CVE po zakończonym sprawdzaniu albo
-same wyniki skanu po **Pomiń** (CVE można sprawdzić później i wysłać przyciskiem **CVE → DefectDojo**).
-
-
-Sekcja `[vuln]` w pliku konfiguracji skanu: `mode = "ask" | "auto" | "off"` (domyślnie `ask`, nadpisywane przy
-starcie skanu), `verify` (nuclei), `nvd_url`, `cache_hours`, `verify_rate`.
-
-Każda podatność ma poziom dowodu (lista sortowana od najpewniejszych):
-
-| Dowód | Kiedy | DefectDojo |
-|---|---|---|
-| `confirmed` | trafienie nieinwazyjnego szablonu CVE nuclei; CVE spoza wyniku NVD też trafia na listę (ocena z szablonu) | `verified=true` |
-| `version_match` | dokładna wersja upstream mieści się w podatnych wersjach NVD | `verified=false` |
-| `version_backport` | wersja pakietu dystrybucji (Ubuntu, Debian, RHEL…): poprawka mogła zostać przeniesiona wstecz | `verified=false` |
-| `version_conditional` | CVE w NVD dotyczy produktu tylko razem z innym komponentem (konfiguracja AND, np. „na Windows”) — wymagany komponent jest w opisie | `verified=false` |
-
-Identyfikacja usług pod NVD: CPE z nmap (z wersją usługi, gdy CPE jej nie ma), poprawiony dostawca dla nazw
-zastąpionych w NVD (`igor_sysoev:nginx` → `f5:nginx`, `mysql:mysql` → `oracle:mysql`), wersje OpenSSH w formacie
-słownika NVD (`8.9p1` → wersja `8.9`, update `p1`), CVE wycofane (`Rejected`) są pomijane. Brak odpowiedzi NVD
-dla części usług nie przerywa sprawdzania (uwaga w wyniku); bez żadnej odpowiedzi sprawdzanie kończy się błędem.
-
-Nuclei uruchamiane jest tylko z szablonami `cve`, bez tagów `dos`, `fuzz`, `intrusive`, `bruteforce`, `oast`,
-`rce`, `sqli`, `file-upload`, `default-login` (nic, co wykonuje kod, modyfikuje dane albo próbuje logowania),
-bez OOB (`-ni`), z limitem `verify_rate` i tylko na usługach przebiegu w aktualnym zakresie celów i portów.
-Respektuje okno czasowe harmonogramu: poza oknem weryfikacja jest pomijana, a na końcu okna przerywana
-(trafienia sprzed przerwania zostają). Usługi oznaczone jako `false_positive` nie mają podatności na liście
-ani w DefectDojo.
-
-## Praca lokalna bez Dockera
-
-Wymagania: Rust (stable), Node.js 24, PostgreSQL 16, nmap w `PATH` — szczegóły w [`backend/README.md`](backend/README.md).
-
-```bash
+# 2. Frontend
 cd frontend && npm ci && npm run build && cd ..
+
+# 3. Backend
 read -rs -p "Hasło pierwszego administratora: " ASI_ADMIN_PASSWORD
 export ASI_ADMIN_PASSWORD
-export DATABASE_URL=postgres://asi:asi@127.0.0.1:5432/asi ASI_DEMO_KEY=1 ASI_STATIC_DIR=../frontend/dist
-(cd backend && cargo run -p asi -- serve)                    # http://127.0.0.1:8080
-cd frontend && ASI_API=http://127.0.0.1:8080 npm run dev     # tryb deweloperski na :5173
+export DATABASE_URL=postgres://asi:asi@127.0.0.1:5432/asi
+export ASI_DEMO_KEY=1                      # klucz w pamięci — tylko demo
+export ASI_STATIC_DIR=../frontend/dist
+(cd backend && cargo run -p asi -- serve)  # http://127.0.0.1:8080
 ```
 
-Kontrole: w `backend/` — `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
-`DATABASE_URL=… cargo test`; w `frontend/` — `npm run build`, `npm audit`.
+Tryb deweloperski frontendu (hot reload na porcie 5173):
 
-## Wymagania zadania a implementacja
+```bash
+cd frontend && ASI_API=http://127.0.0.1:8080 npm run dev
+```
 
-| Wymaganie | Gdzie |
-|---|---|
-| Wczytanie IP, CIDR, domen (ręcznie, CSV, JSON; plik organizatora z `ip_address`) | `asi-core/targets.rs`, `/api/v1/targets`, strona Cele |
-| Wielowątkowy skan nmap, podgrupy, czas trwania | `asi-scanner` (adaptacyjne podgrupy, workery), `scan_runs.coverage`, `duration_ms` |
-| Bezpieczeństwo i tempo | `Scope::check` przed każdym połączeniem, limit 256 KiB, `global_max_rate`, tylko GET |
-| Okna czasowe, częstotliwość, wznowienie | `asi-scanner/config.rs`, harmonogram w `asi-api/scans.rs`, `scan_chunks`; ustawianie z interfejsu: zakładka Harmonogram (`GET/PUT /api/v1/schedule`, tabela `scan_schedule`) |
-| Aktywne hosty i usługi | `asi-scanner/nmap.rs` (argumenty jako lista, `-iL -`) |
-| HTTP: tytuł, kod, nagłówki, ciasteczka, TLS, przekierowania | `asi-scanner/http.rs` |
-| CMS, framework, serwer, IoT, staging, panele | `backend/signatures/default.yaml`, `asi-fingerprint` |
-| Własne sygnatury | `/api/v1/signatures`, strona Sygnatury |
-| Porównanie przebiegów, hosty niestabilne | `asi-core/diff.rs`, `asi-db/results.rs` (`unstable` → `inactive`) |
-| Import i eksport JSON/CSV, DefectDojo (engagement per IP) | `/api/v1/results/import`, `/runs/{id}/export`, `/runs/{id}/defectdojo` |
-| Podatności usług: CVE, CVSS, severity | `asi-core/vuln.rs`, `asi-vuln` (NVD), `asi-scanner/nuclei.rs`, `/runs/{id}/vuln-check`, `/runs/{id}/vuln-check/skip`, `/runs/{id}/vulnerabilities` |
-| Edycja niezależna od skanu | korekty `/api/v1/overrides` nakładane na widok i eksport |
-| RBAC, 4 role | `asi-core/rbac.rs` (macierz §14.1), kontrola w każdym handlerze |
-| Szyfrowanie pól | `asi-crypto` (AES-256-GCM, AAD per rekord), redakcja sekretów w API |
-| Dashboard | `/api/v1/dashboard` (liczniki w SQL), strona Dashboard |
+> W środowisku produkcyjnym zamiast `ASI_DEMO_KEY` ustaw `ASI_MASTER_KEY_FILE` (32 bajty w base64, np. `openssl rand -base64 32 > master.key`).
 
-## Role
+## Użycie
 
-| Uprawnienie | admin | editor | analyst | viewer |
-|---|---|---|---|---|
-| Odczyt i eksport | tak | tak | tak | tak |
-| Korekty wyników, konfiguracja i uruchamianie skanów, DefectDojo | tak | tak | tak | nie |
-| Dodawanie, import i usuwanie celów, tworzenie i usuwanie sygnatur | tak | tak | nie | nie |
-| Edycja istniejących celów i sygnatur | tak | tak | tak | nie |
-| Użytkownicy, audyt, odsłonięcie wartości ciasteczek | tak | nie | nie | nie |
+### Przez interfejs
 
-Frontend ukrywa niedostępne przyciski na podstawie uprawnień z `/api/v1/me`; dostęp egzekwuje backend.
+1. **Cele** — dodaj adresy IP, zakresy CIDR lub domeny ręcznie albo zaimportuj plik CSV/JSON.
+2. **Skany → Harmonogram** — ustaw częstotliwość i okna czasowe albo uruchom skan ręcznie.
+3. **Przebiegi** — śledź postęp, czas trwania i pokrycie; po zakończeniu potwierdź sprawdzenie podatności (**Sprawdzić podatności?**).
+4. **Dashboard** — przeglądaj najważniejsze znaleziska i zmiany względem poprzedniego przebiegu.
+5. **Sygnatury** — dodawaj własne reguły detekcji.
+6. Eksportuj wyniki do JSON/CSV/PDF lub wyślij je do DefectDojo (**CVE → DefectDojo**).
 
-## Sygnatury
+### Import celów z CSV
 
-Pliki `backend/signatures/*.yaml` lub strona Sygnatury. Typy reguł: `header`, `cookie`, `body`, `title`,
-`path` (GET bez logowania, tylko ścieżka w obrębie usługi, np. `/admin`), `favicon_sha256`, `service`
-(banner z nmap), `hostname`, `port`. Pewność = `confidence * (0.6 + 0.4 * udział spełnionych reguł)`.
+Obsługiwane są dwa formaty z nagłówkiem:
+
+```csv
+target,tags,note
+10.0.0.0/24,prod;dmz,Sieć produkcyjna
+example.com,web,
+```
+
+Format organizatora — kolumna `ip_address` jest celem, a `subnet_cidr`, `network_zone` i `hostname`
+stają się tagami `subnet:…`, `zone:…`, `host:…`. Ponowny import nie nadpisuje istniejących celów.
+
+### Przykłady API
+
+```bash
+# Logowanie (sesja w cookie)
+curl -c cookies.txt -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"<hasło>"}' \
+  http://127.0.0.1:8080/api/v1/auth/login
+
+# Import celów z pliku CSV
+curl -b cookies.txt --data-binary @targets.csv \
+  'http://127.0.0.1:8080/api/v1/targets/import?format=csv'
+
+# Start skanu wszystkich celów → {"run_id": "..."}
+curl -b cookies.txt -X POST http://127.0.0.1:8080/api/v1/runs
+
+# Eksport wyników przebiegu do CSV
+curl -b cookies.txt -o wyniki.csv \
+  'http://127.0.0.1:8080/api/v1/runs/<run_id>/export?format=csv'
+
+# Raport PDF
+curl -b cookies.txt -o raport.pdf \
+  http://127.0.0.1:8080/api/v1/runs/<run_id>/report.pdf
+```
+
+Pełna lista endpointów: [`backend/README.md`](backend/README.md).
+
+### Własna sygnatura
 
 ```yaml
 - id: grafana
@@ -133,7 +221,109 @@ Pliki `backend/signatures/*.yaml` lub strona Sygnatury. Typy reguł: `header`, `
       regex: '^Grafana'
 ```
 
-## Struktura repozytorium
+Pewność wyniku: `confidence * (0.6 + 0.4 * udział spełnionych reguł)`.
 
-- [backend/](backend/README.md) zawiera aplikację PostgreSQL, migracje, konfigurację i wbudowane sygnatury.
-- [frontend/](frontend/) zawiera interfejs React, klienta API i zasoby interfejsu.
+## Konfiguracja
+
+### Zmienne środowiskowe
+
+| Zmienna | Domyślnie | Opis |
+|---|---|---|
+| `ASI_ADMIN_PASSWORD` | wymagane przy pierwszym starcie | hasło pierwszego administratora |
+| `ASI_DB_PASSWORD` | wymagane | hasło bazy (Docker) |
+| `ASI_PORT` | `8080` | port na `127.0.0.1` |
+| `ASI_SCAN_CONFIG` | `backend/config/scan.toml` | plik konfiguracji skanu |
+| `ASI_SESSION_TTL_HOURS` | `12` | czas życia sesji |
+| `ASI_COOKIE_SECURE` | `false` | `true` za HTTPS |
+| `ASI_DD_URL`, `ASI_DD_TOKEN`, `ASI_DD_PRODUCT` | — | integracja z DefectDojo (wszystkie trzy albo żadna) |
+| `ASI_NVD_API_KEY` | — | klucz NVD API (wyższy limit zapytań) |
+
+### Plik skanu (`backend/config/scan.toml`)
+
+```toml
+ports = "21,22,80,443,8000-8100,8443"  # lista dozwolonych portów (domyślnie top_ports = 100)
+global_max_rate = 500                  # łączny limit pakietów/s
+concurrency = 4                        # równoległe procesy nmap
+chunk_size = 64                        # startowy rozmiar podgrupy (adaptacyjny 8–512)
+target_chunk_secs = 300                # docelowy czas jednej podgrupy
+inactive_after_misses = 3              # po ilu przebiegach host jest nieaktywny
+
+[vuln]
+mode = "ask"     # ask | auto | off
+verify = false   # potwierdzanie szablonami nuclei
+```
+
+## Role i uprawnienia
+
+| Uprawnienie | admin | editor | analyst | viewer |
+|---|:-:|:-:|:-:|:-:|
+| Odczyt i eksport | ✅ | ✅ | ✅ | ✅ |
+| Korekty wyników, uruchamianie skanów, DefectDojo | ✅ | ✅ | ✅ | ❌ |
+| Edycja istniejących celów i sygnatur | ✅ | ✅ | ✅ | ❌ |
+| Dodawanie, import i usuwanie celów i sygnatur | ✅ | ✅ | ❌ | ❌ |
+| Użytkownicy, audyt, odsłonięcie wartości ciasteczek | ✅ | ❌ | ❌ | ❌ |
+
+Role odpowiadają wymaganiom zadania: **Administracja**, **Dodawanie/usuwanie/modyfikacja**, **Modyfikacja i odczyt**, **Odczyt**.
+
+## Struktura projektu
+
+```text
+.
+├── backend/
+│   ├── bin/asi/               # punkt wejścia: asi serve | asi migrate
+│   ├── crates/
+│   │   ├── asi-api/           # REST API (Axum), sesje, RBAC, DefectDojo, raporty
+│   │   ├── asi-core/          # model domeny: cele, diff, RBAC, scoring, hasła
+│   │   ├── asi-crypto/        # szyfrowanie pól AES-256-GCM
+│   │   ├── asi-db/            # PostgreSQL, repozytoria, migracje
+│   │   ├── asi-fingerprint/   # silnik sygnatur YAML
+│   │   ├── asi-scanner/       # nmap, podgrupy, prober HTTP/TLS, nuclei
+│   │   └── asi-vuln/          # klient NVD i korelacja CVE
+│   ├── config/scan.toml       # konfiguracja skanu
+│   ├── migrations/            # migracje SQL
+│   └── signatures/            # wbudowane sygnatury
+├── frontend/src/
+│   ├── pages/                 # Dashboard, Cele, Przebiegi, Harmonogram, Sygnatury, Użytkownicy
+│   └── components/            # komponenty UI
+├── Dockerfile
+└── docker-compose.yml
+```
+
+### Testy i kontrola jakości
+
+```bash
+# backend/
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+DATABASE_URL=postgres://asi:asi@127.0.0.1:5432/asi cargo test
+
+# frontend/
+npm run build
+npm audit
+```
+
+## Wymagania zadania a implementacja
+
+| Wymaganie | Implementacja |
+|---|---|
+| Wczytanie IP, CIDR, domen (ręcznie, CSV, JSON) | `asi-core/targets.rs`, `/api/v1/targets`, strona Cele |
+| Wielowątkowy skan, podgrupy, czas trwania | `asi-scanner` (adaptacyjne podgrupy, workery), `duration_ms` |
+| Bezpieczeństwo i tempo | `Scope::check`, limit 256 KiB, `global_max_rate`, tylko GET |
+| Okna czasowe, częstotliwość, wznowienie | harmonogram `/api/v1/schedule`, `scan_chunks` |
+| Aktywne hosty i usługi | `asi-scanner/nmap.rs` |
+| HTTP: tytuł, kod, nagłówki, ciasteczka, TLS, przekierowania | `asi-scanner/http.rs` |
+| CMS, framework, serwer, IoT, staging, panele | `backend/signatures/default.yaml`, `asi-fingerprint` |
+| Własne sygnatury | `/api/v1/signatures`, strona Sygnatury |
+| Porównanie przebiegów, hosty niestabilne | `asi-core/diff.rs`, `asi-db/results.rs` |
+| Import/eksport JSON/CSV, DefectDojo | `/results/import`, `/runs/{id}/export`, `/runs/{id}/defectdojo` |
+| Edycja niezależna od skanu | `/api/v1/overrides` |
+| RBAC, 4 role | `asi-core/rbac.rs` |
+| Szyfrowanie danych w spoczynku | `asi-crypto` |
+| Dashboard | `/api/v1/dashboard`, strona Dashboard |
+
+## Licencja
+
+Projekt udostępniany na licencji **MIT** — szczegóły w pliku [LICENSE](LICENSE).
+Wszystkie zależności mają licencje zgodne z open source (MIT, Apache-2.0, BSD, Zlib i pokrewne).
+
+> ⚠️ Skanuj wyłącznie infrastrukturę, do której masz uprawnienia.
