@@ -163,6 +163,7 @@ dependencies = [
  "asi-db",
  "asi-fingerprint",
  "asi-scanner",
+ "asi-vuln",
  "axum",
  "axum-extra",
  "reqwest",
@@ -248,6 +249,7 @@ dependencies = [
  "regex",
  "reqwest",
  "serde",
+ "serde_json",
  "sha2",
  "time",
  "tokio",
@@ -256,6 +258,19 @@ dependencies = [
  "tracing",
  "url",
  "x509-parser",
+]
+
+[[package]]
+name = "asi-vuln"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "asi-core",
+ "axum",
+ "reqwest",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

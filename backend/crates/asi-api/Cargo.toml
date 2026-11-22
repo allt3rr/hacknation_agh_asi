@@ -13,6 +13,7 @@ asi-crypto.workspace = true
 asi-db.workspace = true
 asi-fingerprint.workspace = true
 asi-scanner.workspace = true
+asi-vuln.workspace = true
 axum.workspace = true
 axum-extra.workspace = true
 serde.workspace = true

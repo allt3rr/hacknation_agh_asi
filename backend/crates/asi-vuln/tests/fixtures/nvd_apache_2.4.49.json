@@ -1,0 +1,46 @@
+{
+  "resultsPerPage": 3,
+  "startIndex": 0,
+  "totalResults": 3,
+  "format": "NVD_CVE",
+  "version": "2.0",
+  "timestamp": "2026-11-22T10:00:00.000",
+  "vulnerabilities": [
+    {
+      "cve": {
+        "id": "CVE-2021-41773",
+        "published": "2021-10-05T09:15:07.593",
+        "descriptions": [
+          { "lang": "es", "value": "Se encontró un fallo" },
+          { "lang": "en", "value": "A flaw was found in a change made to path normalization in Apache HTTP Server 2.4.49." }
+        ],
+        "metrics": {
+          "cvssMetricV31": [
+            { "source": "other@example.org", "type": "Secondary", "cvssData": { "version": "3.1", "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "baseScore": 9.8, "baseSeverity": "CRITICAL" } },
+            { "source": "nvd@nist.gov", "type": "Primary", "cvssData": { "version": "3.1", "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", "baseScore": 7.5, "baseSeverity": "HIGH" } }
+          ]
+        }
+      }
+    },
+    {
+      "cve": {
+        "id": "CVE-2021-42013",
+        "published": "2021-10-07T16:15:09.270",
+        "descriptions": [ { "lang": "en", "value": "It was found that the fix for CVE-2021-41773 was insufficient." } ],
+        "metrics": {
+          "cvssMetricV30": [
+            { "source": "nvd@nist.gov", "type": "Primary", "cvssData": { "version": "3.0", "vectorString": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "baseScore": 9.8, "baseSeverity": "CRITICAL" } }
+          ]
+        }
+      }
+    },
+    {
+      "cve": {
+        "id": "CVE-2099-0001",
+        "published": "2099-01-01T00:00:00.000",
+        "descriptions": [ { "lang": "en", "value": "Awaiting analysis." } ],
+        "metrics": {}
+      }
+    }
+  ]
+}

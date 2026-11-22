@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Target } from "../types";
+import type { Target, VulnMode } from "../types";
 import { BTN_SECONDARY, toggleAll } from "../utils";
 
 const PAGE = 5;
@@ -9,7 +9,7 @@ interface TargetPickerProps {
   /** Trwa inny skan: start zablokowany. */
   busy: boolean;
   /** Start na wybranych celach; po sukcesie zaznaczenie jest czyszczone. */
-  onStart: (ids: string[]) => Promise<boolean>;
+  onStart: (ids: string[], vulnCheck: VulnMode) => Promise<boolean>;
 }
 
 /** Wybór celów do jednego przebiegu: wyszukiwarka, 5 na stronę, „zaznacz wszystkie” w obrębie wyników. */
@@ -17,6 +17,7 @@ export function TargetPicker({ targets, busy, onStart }: TargetPickerProps) {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [vulnCheck, setVulnCheck] = useState<VulnMode>("ask");
 
   const needle = query.trim().toLowerCase();
   const filtered = useMemo(
@@ -42,7 +43,7 @@ export function TargetPicker({ targets, busy, onStart }: TargetPickerProps) {
     });
 
   const start = async () => {
-    if (await onStart(selected)) setPicked(new Set());
+    if (await onStart(selected, vulnCheck)) setPicked(new Set());
   };
 
   return (
@@ -69,7 +70,15 @@ export function TargetPicker({ targets, busy, onStart }: TargetPickerProps) {
         <span className="mono text-xs text-muted" role="status">
           zaznaczone: {selected.length}
         </span>
-        <button className="ml-auto" disabled={busy || selected.length === 0} onClick={start} title="Przy ustawionych oknach czasowych start tylko w oknie">
+        <label className="ml-auto flex items-center gap-1 text-xs text-muted">
+          Podatności po skanie
+          <select value={vulnCheck} onChange={(e) => setVulnCheck(e.target.value as VulnMode)} aria-label="Sprawdzanie podatności po skanie">
+            <option value="ask">zapytaj</option>
+            <option value="auto">sprawdź automatycznie</option>
+            <option value="off">nie sprawdzaj</option>
+          </select>
+        </label>
+        <button disabled={busy || selected.length === 0} onClick={start} title="Przy ustawionych oknach czasowych start tylko w oknie">
           {busy ? "Skan w toku..." : `Uruchom skan (${selected.length})`}
         </button>
       </div>

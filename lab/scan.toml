@@ -6,3 +6,9 @@ chunk_size = 16
 min_chunk = 4
 host_timeout = "2m"
 inactive_after_misses = 2
+
+# Podatności: pytanie po skanie i weryfikacja aktywna nieinwazyjnymi szablonami (lab bez internetu,
+# NVD odpytuje kontener asi przez sieć domyślną).
+[vuln]
+mode = "ask"
+verify = true

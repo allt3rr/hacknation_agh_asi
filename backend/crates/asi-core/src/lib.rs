@@ -6,3 +6,4 @@ pub mod model;
 pub mod password;
 pub mod rbac;
 pub mod targets;
+pub mod vuln;

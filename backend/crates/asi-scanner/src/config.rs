@@ -36,6 +36,49 @@ pub struct ScanConfig {
     /// Ile razy podgrupa może być wznawiana, zanim zostanie porzucona.
     pub max_chunk_attempts: i32,
     pub schedule: ScheduleConfig,
+    pub vuln: VulnConfig,
+}
+
+/// Co zrobić ze sprawdzaniem podatności po opublikowanym przebiegu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum VulnMode {
+    /// Start od razu po publikacji.
+    Auto,
+    /// Przebieg czeka na decyzję użytkownika (`pending_decision`).
+    #[default]
+    Ask,
+    /// Bez automatycznego startu; ręczne uruchomienie nadal możliwe.
+    Off,
+}
+
+/// Sekcja `[vuln]`: korelacja CVE (NVD) i opcjonalna weryfikacja aktywna (nuclei).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct VulnConfig {
+    pub mode: VulnMode,
+    /// Weryfikacja aktywna nieinwazyjnymi szablonami nuclei.
+    pub verify: bool,
+    pub nuclei_binary: String,
+    /// Endpoint NVD CVE API 2.0 (podmieniany w testach i w środowisku bez internetu).
+    pub nvd_url: String,
+    /// Ważność wpisu w cache CVE (godziny).
+    pub cache_hours: i64,
+    /// Limit żądań/s nuclei.
+    pub verify_rate: u32,
+}
+
+impl Default for VulnConfig {
+    fn default() -> Self {
+        Self {
+            mode: VulnMode::Ask,
+            verify: false,
+            nuclei_binary: "nuclei".into(),
+            nvd_url: "https://services.nvd.nist.gov/rest/json/cves/2.0".into(),
+            cache_hours: 24,
+            verify_rate: 20,
+        }
+    }
 }
 
 impl Default for ScanConfig {
@@ -60,6 +103,7 @@ impl Default for ScanConfig {
             recheck_missing: true,
             max_chunk_attempts: 3,
             schedule: ScheduleConfig::default(),
+            vuln: VulnConfig::default(),
         }
     }
 }
@@ -118,6 +162,9 @@ impl ScanConfig {
             crate::scope::PortSet::parse(ports)?;
         }
         self.schedule.windows()?;
+        if self.vuln.cache_hours < 0 || self.vuln.verify_rate == 0 {
+            bail!("vuln.cache_hours musi być >= 0, a vuln.verify_rate > 0");
+        }
         Ok(())
     }
 
@@ -275,6 +322,40 @@ mod tests {
             "[[schedule.windows]]\nstart = \"22:00\"\nend = \"06:00\"\ndays = [\"pon\"]\n";
         assert!(ScanConfig::from_toml(&format!("[schedule]\n{bad_day}")).is_err());
         assert!(ScanConfig::from_toml("nieznane_pole = 1").is_err());
+    }
+
+    #[test]
+    fn vuln_section_defaults_and_validation() {
+        let cfg = ScanConfig::from_toml("top_ports = 10").unwrap();
+        assert_eq!(cfg.vuln.mode, VulnMode::Ask);
+        assert!(!cfg.vuln.verify);
+        let cfg = ScanConfig::from_toml(
+            "[vuln]
+mode = \"auto\"
+verify = true
+",
+        )
+        .unwrap();
+        assert_eq!(cfg.vuln.mode, VulnMode::Auto);
+        assert!(cfg.vuln.verify);
+        assert!(ScanConfig::from_toml(
+            "[vuln]
+nieznane = 1
+"
+        )
+        .is_err());
+        assert!(ScanConfig::from_toml(
+            "[vuln]
+mode = \"zawsze\"
+"
+        )
+        .is_err());
+        assert!(ScanConfig::from_toml(
+            "[vuln]
+verify_rate = 0
+"
+        )
+        .is_err());
     }
 
     #[test]

@@ -29,6 +29,18 @@ inactive_after_misses = 3
 recheck_missing = true
 max_chunk_attempts = 3
 
+# Podatności po opublikowanym przebiegu: korelacja usług (nmap -sV / technologie z wersją) z CVE w NVD
+# i ocena CVSS. mode: "ask" (pytanie w interfejsie), "auto" (od razu) albo "off" (tylko ręcznie).
+# verify = true: dodatkowo nieinwazyjne szablony CVE nuclei (bez DoS/fuzz/intrusive/OOB), tylko na
+# usługach przebiegu w zakresie celów i portów. Klucz NVD (wyższy limit): zmienna ASI_NVD_API_KEY.
+[vuln]
+mode = "ask"
+verify = false
+# nuclei_binary = "nuclei"
+# nvd_url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+# cache_hours = 24
+# verify_rate = 20
+
 # Harmonogram zapisany w interfejsie (zakładka Harmonogram) zastępuje tę sekcję.
 [schedule]
 enabled = false

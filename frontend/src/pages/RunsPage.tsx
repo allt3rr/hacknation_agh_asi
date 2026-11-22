@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api";
+import { toast } from "sonner";
+import { ApiError, api } from "../api";
 import { Card } from "../components/Card";
 import { ChangeTable } from "../components/ChangeTable";
 import { DataTable } from "../components/DataTable";
@@ -7,10 +8,11 @@ import { FilePicker } from "../components/FilePicker";
 import { ObservationTable } from "../components/ObservationTable";
 import { ScanProgress } from "../components/ScanProgress";
 import { TargetPicker } from "../components/TargetPicker";
+import { SEVERITIES, SEVERITY_COLORS, VULN_STATE_LABELS, VulnTable } from "../components/VulnTable";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
 import { printRunReport } from "../report";
-import type { Change, Page, ResultRow, Run, RunStatus, Session, Target } from "../types";
+import type { Change, Page, ResultRow, Run, RunStatus, Session, Severity, Target, VulnMode, VulnPage } from "../types";
 import { BTN_SECONDARY, STATUS_LABELS, coverageText, downloadBlob, fileFormat, formatDate, formatDuration } from "../utils";
 
 const STATUS_COLORS: Record<RunStatus, string> = {
@@ -26,10 +28,29 @@ const PAGE_SIZE = 100;
 // bez scans.run lista wyboru nie jest pokazywana, więc nie pobieramy celów (stabilna referencja dla useApiData)
 const noTargets = () => Promise.resolve<Target[]>([]);
 const REFRESH_MS = 5000;
+// Jak długo po akcji (skan, decyzja o CVE, wysyłka) lista czeka na wynik wysyłki do DefectDojo.
+const EXPORT_WAIT_MS = 2 * 60 * 1000;
+
+/** Popup (Sonner z shadcn) o przesłaniu wyników przebiegu do DefectDojo albo o błędzie wysyłki. */
+function notifyExport(r: Run) {
+  const e = r.dd_export;
+  if (!e) return;
+  const run = formatDate(r.started_at ?? r.created_at);
+  if (e.error) {
+    toast.error("Wysyłka do DefectDojo nieudana", { description: `Skan z ${run}: ${e.error}`, duration: 12000 });
+    return;
+  }
+  const what = e.content === "all" ? "Wyniki skanu z opisem CVE" : "Wyniki skanu (bez CVE)";
+  const failed = e.failed?.length ? ` Nieudane IP: ${e.failed.join(", ")}.` : "";
+  toast.success("Przesłano do DefectDojo", {
+    description: `${what} ze skanu z ${run}: findingi ${e.findings ?? 0}, engagementy ${e.engagements ?? 0}.${failed}`,
+  });
+}
 
 type Details =
   | { kind: "services"; run: Run; offset: number; page: Page<ResultRow> }
-  | { kind: "changes"; run: Run; page: Page<Change> };
+  | { kind: "changes"; run: Run; page: Page<Change> }
+  | { kind: "vulns"; run: Run; offset: number; severity?: Severity; page: VulnPage };
 
 export function RunsPage({ session }: { session: Session }) {
   const { data: runs, error, reload } = useApiData(api.runs.list);
@@ -39,14 +60,49 @@ export function RunsPage({ session }: { session: Session }) {
   const [details, setDetails] = useState<Details | null>(null);
   const detailsHeading = useRef<HTMLHeadingElement>(null);
   const scanActive = runs?.some((r) => r.status === "running" || r.status === "queued") ?? false;
+  const checkActive = runs?.some((r) => r.vuln_state === "running") ?? false;
   const running = runs?.find((r) => r.status === "running");
+  const awaiting = canRun ? (runs ?? []).filter((r) => r.vuln_state === "pending_decision") : [];
+  // przebiegi, na których wysyłkę do DefectDojo czekamy (id → termin)
+  const [watching, setWatching] = useState<Record<string, number>>({});
+  const watch = (id: string) => setWatching((w) => ({ ...w, [id]: Date.now() + EXPORT_WAIT_MS }));
+  const waitingExport = Object.keys(watching).length > 0;
+  // ostatnio widziany czas wysyłki per przebieg; null przed pierwszym odczytem (bez popupów za stare wysyłki)
+  const seenExports = useRef<Map<string, string | null> | null>(null);
 
-  // Lista odświeża się sama, dopóki skan czeka lub trwa.
+  // Lista odświeża się sama, dopóki skan lub sprawdzanie podatności trwa albo czekamy na wysyłkę do DefectDojo.
   useEffect(() => {
-    if (!scanActive) return;
+    if (!scanActive && !checkActive && !waitingExport) return;
     const timer = setInterval(reload, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [scanActive, reload]);
+  }, [scanActive, checkActive, waitingExport, reload]);
+
+  // Nowy wynik wysyłki do DefectDojo → popup; obserwacja trwa, dopóki przebieg pracuje, potem do terminu.
+  useEffect(() => {
+    if (!runs) return;
+    const seen = seenExports.current;
+    const done = new Set<string>();
+    for (const r of runs) {
+      const at = r.dd_export?.at ?? null;
+      if (seen && at && seen.get(r.id) !== at) {
+        notifyExport(r);
+        done.add(r.id);
+      }
+    }
+    seenExports.current = new Map(runs.map((r) => [r.id, r.dd_export?.at ?? null]));
+    setWatching((w) => {
+      const now = Date.now();
+      const next: Record<string, number> = {};
+      for (const [id, until] of Object.entries(w)) {
+        if (done.has(id)) continue;
+        const r = runs.find((x) => x.id === id);
+        const busy = r && (r.status === "running" || r.status === "queued" || r.vuln_state === "running");
+        if (busy) next[id] = now + EXPORT_WAIT_MS;
+        else if (until > now) next[id] = until;
+      }
+      return Object.keys(next).length === Object.keys(w).length && Object.keys(w).every((id) => next[id] === w[id]) ? w : next;
+    });
+  }, [runs]);
 
   // Po otwarciu innych szczegółów (inny przebieg lub rodzaj) fokus i widok przechodzą na nagłówek panelu.
   const detailsId = details ? `${details.kind}-${details.run.id}` : null;
@@ -56,10 +112,11 @@ export function RunsPage({ session }: { session: Session }) {
     detailsHeading.current?.scrollIntoView({ block: "start" });
   }, [detailsId]);
 
-  const startScan = async (ids: string[]) => {
+  const startScan = async (ids: string[], vulnCheck: VulnMode) => {
     let ok = false;
     await run(async () => {
-      await api.runs.start(ids);
+      const { run_id } = await api.runs.start(ids, vulnCheck);
+      watch(run_id);
       ok = true;
       info(`Skan uruchomiony na celach: ${ids.length}`);
       await reload();
@@ -89,10 +146,37 @@ export function RunsPage({ session }: { session: Session }) {
   const exportRun = (r: Run, format: "csv" | "json") =>
     run(async () => downloadBlob(await api.runs.exportFile(r.id, format), `asi-${r.id}.${format}`));
 
+  const showVulns = (r: Run, offset = 0, severity?: Severity) =>
+    run(async () => setDetails({ kind: "vulns", run: r, offset, severity, page: await api.runs.vulnerabilities(r.id, offset, severity) }));
+
+  const checkVulns = (r: Run) =>
+    run(async () => {
+      await api.runs.startVulnCheck(r.id);
+      watch(r.id);
+      info("Sprawdzanie podatności uruchomione");
+      await reload();
+    });
+
+  // popup pokazuje efekt nowego wyniku wysyłki zapisanego w przebiegu (także przy błędzie 502)
   const sendToDefectDojo = (r: Run) =>
     run(async () => {
-      const res = await api.runs.sendToDefectDojo(r.id);
-      info(`Wysłano do DefectDojo findingi: ${res.findings}`);
+      watch(r.id);
+      try {
+        await api.runs.sendToDefectDojo(r.id);
+      } catch (e) {
+        // 502 (DefectDojo niedostępne) jest zapisane w przebiegu i pokaże je popup; inne błędy pokazujemy od razu
+        if (!(e instanceof ApiError && e.status === 502)) throw e;
+      } finally {
+        await reload();
+      }
+    });
+
+  const skipVulns = (r: Run) =>
+    run(async () => {
+      await api.runs.skipVulnCheck(r.id);
+      watch(r.id);
+      info("Pominięto sprawdzanie CVE. Wyniki skanu trafią do DefectDojo; podatności sprawdzisz później przyciskiem „Sprawdź CVE”.");
+      await reload();
     });
 
   return (
@@ -100,6 +184,30 @@ export function RunsPage({ session }: { session: Session }) {
       {running && <ScanProgress run={running} onCancel={canRun ? () => cancel(running) : undefined} />}
 
       {canRun && <TargetPicker targets={targets ?? []} busy={scanActive} onStart={startScan} />}
+
+      {awaiting.map((r) => (
+        <section key={r.id} role="alert" className="panel mb-3 flex flex-wrap items-center gap-2 border-orange p-3">
+          <div className="flex-1">
+            <p className="font-medium">
+              Skan z {formatDate(r.started_at ?? r.created_at)} zakończony. Sprawdzić podatności (CVE) wykrytych usług?
+            </p>
+            <ul className="mt-1 list-disc pl-5 text-muted">
+              <li>
+                <strong>Sprawdź podatności</strong>: po zakończeniu sprawdzania wyniki razem z opisem CVE automatycznie
+                trafią do DefectDojo.
+              </li>
+              <li>
+                <strong>Pomiń</strong>: do DefectDojo trafią same wyniki skanu. Podatności możesz sprawdzić później
+                przyciskiem „Sprawdź CVE” i przesłać je przyciskiem „CVE → DefectDojo”.
+              </li>
+            </ul>
+          </div>
+          <button onClick={() => checkVulns(r)}>Sprawdź podatności</button>
+          <button className={BTN_SECONDARY} onClick={() => skipVulns(r)}>
+            Pomiń
+          </button>
+        </section>
+      ))}
 
       <Card
         title={`Przebiegi (${runs?.length ?? 0})`}
@@ -140,6 +248,23 @@ export function RunsPage({ session }: { session: Session }) {
             { header: "Czas", mono: true, render: (r) => formatDuration(r.duration_ms) },
             { header: "Pokrycie", mono: true, render: (r) => coverageText(r.coverage) },
             {
+              header: "Podatności",
+              title: (r) => [VULN_STATE_LABELS[r.vuln_state], r.vuln_reason].filter(Boolean).join(": "),
+              render: (r) => (
+                <>
+                  <span className={r.vuln_state === "failed" ? "text-red" : r.vuln_state === "running" ? "text-accent" : ""}>
+                    {VULN_STATE_LABELS[r.vuln_state]}
+                  </span>
+                  {r.vuln_state === "done" && (
+                    <div className="text-muted">
+                      CVE: {r.vuln_summary.vulnerabilities ?? 0}, potwierdzone: {r.vuln_summary.confirmed ?? 0}
+                    </div>
+                  )}
+                  {r.vuln_reason && <div className="text-muted">{r.vuln_reason}</div>}
+                </>
+              ),
+            },
+            {
               header: "",
               render: (r) => {
                 const name = formatDate(r.started_at ?? r.created_at);
@@ -155,14 +280,29 @@ export function RunsPage({ session }: { session: Session }) {
                       <>
                         <button className={BTN_SECONDARY} aria-label={`Zmiany w przebiegu ${name}`} onClick={() => showChanges(r)}>Zmiany</button>
                         <button className={BTN_SECONDARY} aria-label={`Usługi w przebiegu ${name}`} onClick={() => showServices(r)}>Usługi</button>
+                        {(r.vuln_state === "done" || r.vuln_state === "failed") && (
+                          <button className={BTN_SECONDARY} aria-label={`Podatności w przebiegu ${name}`} onClick={() => showVulns(r)}>CVE</button>
+                        )}
+                        {canRun && (r.status === "done" || r.status === "partial") && r.vuln_state !== "running" && r.vuln_state !== "pending_decision" && (
+                          <button className={BTN_SECONDARY} aria-label={`Sprawdź podatności w przebiegu ${name}`} onClick={() => checkVulns(r)}>
+                            {r.vuln_state === "done" ? "Sprawdź ponownie" : "Sprawdź CVE"}
+                          </button>
+                        )}
+                        {r.vuln_state === "done" && can(session, "integrations.export") && (
+                          <button
+                            className={BTN_SECONDARY}
+                            title="Wyślij info z wynikami CVE do DefectDojo (engagement per IP)"
+                            aria-label={`Wyślij wyniki CVE przebiegu ${name} do DefectDojo`}
+                            onClick={() => sendToDefectDojo(r)}
+                          >
+                            CVE → DefectDojo
+                          </button>
+                        )}
                         {can(session, "export") && (
                           <>
                             <button className={BTN_SECONDARY} aria-label={`Eksport przebiegu ${name} do JSON`} onClick={() => exportRun(r, "json")}>JSON</button>
                             <button className={BTN_SECONDARY} aria-label={`Eksport przebiegu ${name} do CSV`} onClick={() => exportRun(r, "csv")}>CSV</button>
                           </>
-                        )}
-                        {can(session, "integrations.export") && (
-                          <button className={BTN_SECONDARY} aria-label={`Wyślij przebieg ${name} do DefectDojo`} onClick={() => sendToDefectDojo(r)}>DefectDojo</button>
                         )}
                       </>
                     )}
@@ -193,12 +333,61 @@ export function RunsPage({ session }: { session: Session }) {
           title={
             details.kind === "services"
               ? `Usługi (${details.page.total}): ${formatDate(details.run.started_at)}`
-              : `Zmiany (${details.page.total}): ${formatDate(details.run.started_at)}`
+              : details.kind === "vulns"
+                ? `Podatności (${details.page.total}): ${formatDate(details.run.started_at)}`
+                : `Zmiany (${details.page.total}): ${formatDate(details.run.started_at)}`
           }
           headingRef={detailsHeading}
           actions={<button className={BTN_SECONDARY} onClick={() => setDetails(null)}>Zamknij</button>}
         >
-          {details.kind === "services" ? (
+          {details.kind === "vulns" ? (
+            <>
+              <div className="my-2 flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1 text-xs text-muted">
+                  Severity
+                  <select
+                    value={details.severity ?? ""}
+                    onChange={(e) => showVulns(details.run, 0, (e.target.value || undefined) as Severity | undefined)}
+                  >
+                    <option value="">wszystkie</option>
+                    {SEVERITIES.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {SEVERITIES.map((s) => (
+                  <span key={s} className={`mono text-xs ${SEVERITY_COLORS[s]}`}>
+                    {s}: {details.page.summary.by_severity[s] ?? 0}
+                  </span>
+                ))}
+                <span className="text-xs text-muted">
+                  potwierdzone: {details.page.summary.confirmed}, usługi bez wersji: {details.page.summary.unidentified ?? 0}
+                </span>
+              </div>
+              <VulnTable rows={details.page.items} label={`Podatności w przebiegu ${formatDate(details.run.started_at)}`} />
+              <div className="my-2 flex items-center gap-2">
+                <button
+                  className={BTN_SECONDARY}
+                  disabled={details.offset === 0}
+                  onClick={() => showVulns(details.run, Math.max(0, details.offset - PAGE_SIZE), details.severity)}
+                >
+                  Poprzednie
+                </button>
+                <span className="text-muted">
+                  {details.page.total ? details.offset + 1 : 0}–{details.offset + details.page.items.length} z {details.page.total}
+                </span>
+                <button
+                  className={BTN_SECONDARY}
+                  disabled={details.offset + PAGE_SIZE >= details.page.total}
+                  onClick={() => showVulns(details.run, details.offset + PAGE_SIZE, details.severity)}
+                >
+                  Następne
+                </button>
+              </div>
+            </>
+          ) : details.kind === "services" ? (
             <>
               <ObservationTable
                 rows={details.page.items}

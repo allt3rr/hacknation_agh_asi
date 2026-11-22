@@ -9,6 +9,7 @@ mod manage;
 mod results;
 mod routes;
 pub mod scans;
+pub mod vuln;
 
 #[cfg(test)]
 mod tests;
@@ -18,6 +19,8 @@ mod tests_manage;
 mod tests_results;
 #[cfg(test)]
 mod tests_scans;
+#[cfg(test)]
+mod tests_vuln;
 
 pub use auth::{AuthUser, SESSION_COOKIE};
 pub use error::{ApiError, ApiResult};
@@ -123,6 +126,9 @@ pub fn router(state: AppState) -> Router {
         .route("/runs/{id}/changes", get(results::changes))
         .route("/runs/{id}/export", get(results::export_run))
         .route("/runs/{id}/defectdojo", post(defectdojo::export))
+        .route("/runs/{id}/vulnerabilities", get(vuln::list))
+        .route("/runs/{id}/vuln-check", post(vuln::start_check))
+        .route("/runs/{id}/vuln-check/skip", post(vuln::skip_check))
         .route("/observations/{id}/secrets", get(results::secrets))
         .route("/dashboard", get(results::dashboard))
         .route("/results/import", post(results::import_results))

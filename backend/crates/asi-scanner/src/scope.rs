@@ -87,6 +87,16 @@ impl Scope {
         self.resolved.contains(&ip) || self.nets.iter().any(|n| n.contains(&ip))
     }
 
+    /// Czy usługa jest w zakresie: adres w celach, port dozwolony lub wykryty w tym przebiegu.
+    pub fn allows_service(&self, ip: IpAddr, port: u16) -> bool {
+        let detected = self.open.get(&ip).is_some_and(|p| p.contains(&port));
+        let allowed = self
+            .allowed_ports
+            .as_ref()
+            .is_some_and(|p| p.contains(port));
+        self.ip_in_scope(ip) && (detected || allowed)
+    }
+
     /// Czy wolno połączyć się z tym URL-em: schemat http/https, host w celach, port dozwolony lub wykryty.
     pub fn check(&self, url: &Url) -> Result<()> {
         if !matches!(url.scheme(), "http" | "https") {
@@ -103,12 +113,7 @@ impl Scope {
         if !self.ip_in_scope(ip) {
             bail!("adres {ip} poza zakresem");
         }
-        let detected = self.open.get(&ip).is_some_and(|p| p.contains(&port));
-        let allowed = self
-            .allowed_ports
-            .as_ref()
-            .is_some_and(|p| p.contains(port));
-        if !(detected || allowed) {
+        if !self.allows_service(ip, port) {
             bail!("port {port} na {ip} poza zakresem");
         }
         Ok(())

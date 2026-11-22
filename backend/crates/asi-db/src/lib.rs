@@ -12,6 +12,9 @@ pub mod sessions;
 pub mod targets;
 pub mod users;
 pub mod views;
+pub mod vulns;
+#[cfg(test)]
+mod vulns_tests;
 
 use anyhow::{Context, Result};
 use asi_core::rbac;
@@ -132,6 +135,8 @@ mod tests {
             "targets",
             "user_roles",
             "users",
+            "cve_cache",
+            "vulnerabilities",
         ];
         expected.sort_unstable();
         assert_eq!(tables, expected);

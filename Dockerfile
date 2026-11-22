@@ -20,7 +20,17 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --locked -p asi \
  && cp /src/target/release/asi /usr/local/bin/asi
 
-# Etap 3: obraz uruchomieniowy na wspieranym Alpine, bez roota.
+# Etap 3: nuclei (MIT) do weryfikacji aktywnej podatności. Wersja przypięta, integralność modułów
+# sprawdza sum.golang.org; szablony to migawka z tagu (bez aktualizacji w czasie działania).
+FROM golang:1.23-alpine AS nuclei
+ARG NUCLEI_VERSION=v3.3.7
+ARG NUCLEI_TEMPLATES_VERSION=v10.1.0
+RUN apk add --no-cache git \
+ && CGO_ENABLED=0 go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION} \
+ && git clone --depth 1 --branch ${NUCLEI_TEMPLATES_VERSION} https://github.com/projectdiscovery/nuclei-templates /nuclei-templates \
+ && rm -rf /nuclei-templates/.git
+
+# Etap 4: obraz uruchomieniowy na wspieranym Alpine, bez roota.
 FROM alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f
 # nmap-nselibs + nmap-scripts: -sV inicjuje silnik NSE (nse_main.lua i katalog scripts);
 # skryptów nie uruchamiamy (brak --script), więc to nie zwiększa intensywności skanu
@@ -28,6 +38,10 @@ RUN apk add --no-cache "zlib>=1.4-r0" nmap nmap-nselibs nmap-scripts ca-certific
  && adduser -S -D -H -u 10001 -h /app -s /sbin/nologin asi
 WORKDIR /app
 COPY --from=backend /usr/local/bin/asi /usr/local/bin/asi
+# nuclei szuka szablonów w $HOME/nuclei-templates i zapisuje konfigurację w $HOME/.config (HOME=/app)
+COPY --from=nuclei /go/bin/nuclei /usr/local/bin/nuclei
+COPY --from=nuclei /nuclei-templates /app/nuclei-templates
+RUN mkdir -p /app/.config /app/.cache && chown asi /app/.config /app/.cache
 COPY --from=frontend /frontend/dist ./ui
 COPY signatures ./signatures
 COPY backend/config/scan.toml ./config/scan.toml

@@ -10,6 +10,7 @@
 pub mod config;
 pub mod http;
 pub mod nmap;
+pub mod nuclei;
 pub mod scope;
 
 use anyhow::Result;

@@ -30,11 +30,30 @@ pub struct RunView {
     pub triggered_by: Option<Uuid>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    /// Sprawdzanie podatności: none, pending_decision, running, done, failed, skipped.
+    pub vuln_state: String,
+    pub vuln_reason: Option<String>,
+    pub vuln_summary: Value,
+    /// Ostatnia wysyłka do DefectDojo: `at`, `content`, `findings`, `engagements`, `failed`, `error`.
+    pub dd_export: Option<Value>,
 }
 
-const RUN_COLUMNS: &str =
+pub(crate) const RUN_COLUMNS: &str =
     "id, kind, status, reason, coverage, started_at, finished_at, duration_ms,
-                           hosts_total, hosts_done, triggered_by, created_at";
+                           hosts_total, hosts_done, triggered_by, created_at,
+                           vuln_state, vuln_reason, vuln_summary, dd_export";
+
+/// Zapisuje wynik wysyłki do DefectDojo (czas `at` nadaje baza).
+pub async fn set_dd_export(db: &PgPool, run_id: Uuid, result: &Value) -> Result<()> {
+    sqlx::query(
+        "UPDATE scan_runs SET dd_export = $2::jsonb || jsonb_build_object('at', now()) WHERE id = $1",
+    )
+    .bind(run_id)
+    .bind(result)
+    .execute(db)
+    .await?;
+    Ok(())
+}
 
 /// Oznacza przebiegi z wygasłą dzierżawą jako `failed` („utracona dzierżawa”).
 pub async fn recover_orphans(db: &PgPool) -> Result<u64> {

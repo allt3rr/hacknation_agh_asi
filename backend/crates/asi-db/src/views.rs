@@ -114,11 +114,11 @@ pub async fn dashboard(db: &PgPool) -> Result<Value> {
         sqlx::query_as("SELECT state, COUNT(*) FROM assets GROUP BY state ORDER BY state")
             .fetch_all(db)
             .await?;
-    let latest: Option<crate::runs::RunView> = sqlx::query_as(
-        "SELECT id, kind, status, reason, coverage, started_at, finished_at, duration_ms, hosts_total, hosts_done,
-                triggered_by, created_at
-         FROM scan_runs WHERE status IN ('done', 'partial') ORDER BY finished_at DESC NULLS LAST LIMIT 1",
-    )
+    let latest: Option<crate::runs::RunView> = sqlx::query_as(&format!(
+        "SELECT {} FROM scan_runs WHERE status IN ('done', 'partial')
+         ORDER BY finished_at DESC NULLS LAST LIMIT 1",
+        crate::runs::RUN_COLUMNS
+    ))
     .fetch_optional(db)
     .await?;
     let running: bool =

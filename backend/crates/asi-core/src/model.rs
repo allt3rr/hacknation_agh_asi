@@ -23,6 +23,9 @@ pub struct Observation {
     pub version: Option<String>,
     #[serde(default)]
     pub extra_info: Option<String>,
+    /// CPE (URI 2.2) zgłoszone przez nmap dla usługi.
+    #[serde(default)]
+    pub cpe: Vec<String>,
     /// "ssl", gdy nmap wykrył tunel TLS.
     #[serde(default)]
     pub tunnel: Option<String>,
@@ -55,6 +58,7 @@ impl Observation {
             product: None,
             version: None,
             extra_info: None,
+            cpe: Vec::new(),
             tunnel: None,
             http: None,
             detections: Vec::new(),

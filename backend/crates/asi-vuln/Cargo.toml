@@ -1,0 +1,18 @@
+[package]
+name = "asi-vuln"
+description = "ASI: korelacja usług z CVE (NVD API 2.0), klasyfikacja CVSS"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+asi-core.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+axum.workspace = true

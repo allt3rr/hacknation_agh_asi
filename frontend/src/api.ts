@@ -1,22 +1,7 @@
 // Klient REST API v1. Sesję trzyma ciasteczko HttpOnly `asi_session`, które przeglądarka
 // wysyła sama (ten sam origin), więc JavaScript nie widzi ani nie przechowuje tokenu.
 
-import type {
-  Change,
-  Dashboard,
-  FileFormat,
-  ImportSummary,
-  Page,
-  ResultRow,
-  Role,
-  Run,
-  Schedule,
-  Session,
-  SignatureList,
-  Target,
-  TargetPatch,
-  User,
-} from "./types";
+import type { Change, Dashboard, DefectDojoResult, FileFormat, ImportSummary, Page, ResultRow, Role, Run, Schedule, Session, Severity, SignatureList, Target, TargetPatch, User, VulnMode, VulnPage } from "./types";
 
 const API_PREFIX = "/api/v1";
 
@@ -78,10 +63,9 @@ async function readErrorMessage(response: Response): Promise<string> {
 
 async function request<T>(method: Method, path: string, options?: RequestOptions): Promise<T> {
   const response = await send(method, path, options);
-  if (response.status === 204 || response.status === 200 && response.headers.get("content-length") === "0") {
-    return undefined as T;
-  }
-  return (await response.json()) as T;
+  // puste ciało (204, 202 przy starcie sprawdzania CVE itp.) = brak danych, bez parsowania JSON
+  const text = await response.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 async function startSession(pending: Promise<Session>): Promise<Session> {
@@ -118,7 +102,8 @@ export const api = {
 
   runs: {
     list: () => request<Run[]>("GET", "/runs"),
-    start: (targetIds: string[]) => request<{ run_id: string }>("POST", "/runs", { json: { target_ids: targetIds } }),
+    start: (targetIds: string[], vulnCheck: VulnMode) =>
+      request<{ run_id: string }>("POST", "/runs", { json: { target_ids: targetIds, vuln_check: vulnCheck } }),
     cancel: (id: string) => request<void>("POST", `/runs/${id}/cancel`),
     changes: (id: string, offset = 0) => request<Page<Change>>("GET", `/runs/${id}/changes?limit=200&offset=${offset}`),
     observations: (id: string, offset = 0) =>
@@ -127,7 +112,12 @@ export const api = {
       const response = await send("GET", `/runs/${id}/export?format=${format}`);
       return response.blob();
     },
-    sendToDefectDojo: (id: string) => request<{ findings: number }>("POST", `/runs/${id}/defectdojo`),
+    vulnerabilities: (id: string, offset = 0, severity?: Severity) =>
+      request<VulnPage>("GET", `/runs/${id}/vulnerabilities?limit=100&offset=${offset}${severity ? `&severity=${severity}` : ""}`),
+    startVulnCheck: (id: string) => request<void>("POST", `/runs/${id}/vuln-check`),
+    skipVulnCheck: (id: string) => request<void>("POST", `/runs/${id}/vuln-check/skip`),
+    /** Info z wynikami CVE do DefectDojo (engagement per IP). */
+    sendToDefectDojo: (id: string) => request<DefectDojoResult>("POST", `/runs/${id}/defectdojo`),
     importResults: (format: FileFormat, content: string) =>
       request<{ run_id: string; observations: number; changes: number }>("POST", `/results/import?format=${format}`, {
         text: content,

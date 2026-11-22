@@ -9,7 +9,7 @@ use asi_db::audit::{self, Entry};
 use asi_db::results::{publish, PublishInput, PublishOutcome};
 use asi_db::runs::{self, RunView, HEARTBEAT_SECS};
 use asi_fingerprint::SignatureSet;
-use asi_scanner::config::{window_decision, ScanConfig, ScheduleConfig, WindowDecision};
+use asi_scanner::config::{window_decision, ScanConfig, ScheduleConfig, VulnMode, WindowDecision};
 use asi_scanner::http::Limits;
 use asi_scanner::nmap::{AnyRunner, NmapOptions, NmapRunner};
 use asi_scanner::{CancellationToken, Plan, Scanner};
@@ -100,10 +100,12 @@ impl Default for ScanService {
 
 /// Start przebiegu. `Err(msg)` = odmowa (409): trwa skan, poza oknem, błędna konfiguracja, brak celów.
 /// `selection`: tylko te cele (id z `targets`); `None` = wszystkie niewykluczone (harmonogram).
+/// `vuln_mode`: sprawdzanie podatności po publikacji; `None` = z konfiguracji (`[vuln] mode`).
 pub async fn start_run(
     st: &AppState,
     triggered_by: Option<Uuid>,
     selection: Option<&[Uuid]>,
+    vuln_mode: Option<VulnMode>,
 ) -> Result<Uuid, StartError> {
     if selection.is_some_and(|ids| ids.is_empty()) {
         return Err(StartError::BadRequest("Pusta lista celów".into()));
@@ -156,8 +158,9 @@ pub async fn start_run(
             .collect();
     let signatures = load_signatures(st, &svc).await?;
 
+    let vuln_mode = vuln_mode.unwrap_or(cfg.vuln.mode);
     let profile = json!({ "config": cfg, "targets": expanded.len(), "resumed": attempts.len(),
-                          "selected": selection.map(<[Uuid]>::len) });
+                          "selected": selection.map(<[Uuid]>::len), "vuln_mode": vuln_mode });
     let run_id = runs::reserve_scan(&st.db, &svc.owner, triggered_by, &profile)
         .await?
         .ok_or_else(|| StartError::Refused("Trwa inny skan".into()))?;
@@ -172,7 +175,7 @@ pub async fn start_run(
     let st = st.clone();
     tokio::spawn(async move {
         execute(
-            &st, run_id, cfg, signatures, plan, attempts, deadline, token,
+            &st, run_id, cfg, signatures, plan, attempts, deadline, token, vuln_mode,
         )
         .await;
         st.scans.active.lock().unwrap().remove(&run_id);
@@ -195,7 +198,7 @@ impl<E: Into<anyhow::Error>> From<E> for StartError {
 }
 
 /// Cele do skanu. Przy wyborze nieznane id → 400; wykluczone są pomijane zawsze.
-async fn load_targets(
+pub(crate) async fn load_targets(
     st: &AppState,
     selection: Option<&[Uuid]>,
 ) -> Result<Vec<Target>, StartError> {
@@ -257,6 +260,7 @@ async fn execute(
     attempts: HashMap<String, i32>,
     deadline: Option<Instant>,
     token: CancellationToken,
+    vuln_mode: VulnMode,
 ) {
     let owner = st.scans.owner.clone();
     let scanner = match Scanner::new(cfg.clone(), st.scans.runner.clone(), signatures) {
@@ -335,7 +339,8 @@ async fn execute(
         match publish(&st.db, &st.crypto, run_id, &owner, &input).await {
             Ok(PublishOutcome::Published { changes }) => {
                 tracing::info!(%run_id, status = status.as_str(), changes, "przebieg opublikowany");
-                crate::defectdojo::push_after_scan(st, run_id).await;
+                // wysyłka do DefectDojo zależy od decyzji o CVE (`vuln::after_publish`)
+                crate::vuln::after_publish(st, run_id, vuln_mode).await;
                 return;
             }
             Ok(PublishOutcome::LeaseLost) => {
@@ -403,7 +408,7 @@ pub async fn scheduler(st: AppState) {
         if !is_due(last, schedule.every_hours, OffsetDateTime::now_utc()) {
             continue;
         }
-        match start_run(&st, None, None).await {
+        match start_run(&st, None, None, None).await {
             Ok(id) => tracing::info!(%id, "harmonogram: start skanu"),
             Err(StartError::Refused(msg) | StartError::BadRequest(msg)) => {
                 tracing::debug!(%msg, "harmonogram: skan nie wystartował")
@@ -479,6 +484,8 @@ async fn record(
 pub struct StartBody {
     /// Id celów do tego przebiegu; brak = wszystkie niewykluczone.
     target_ids: Option<Vec<Uuid>>,
+    /// Sprawdzanie podatności po skanie: auto, ask, off; brak = z konfiguracji.
+    vuln_check: Option<VulnMode>,
 }
 
 pub async fn post_run(
@@ -489,16 +496,17 @@ pub async fn post_run(
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
     user.require(rbac::SCANS_RUN)?;
     // puste body = wszystkie cele; błędny JSON lub UUID = 400 (nie 422 z ekstraktora Json)
-    let selection = if body.iter().all(u8::is_ascii_whitespace) {
-        None
+    let (selection, vuln_check) = if body.iter().all(u8::is_ascii_whitespace) {
+        (None, None)
     } else {
-        serde_json::from_slice::<StartBody>(&body)
-            .map_err(|e| ApiError::BadRequest(format!("Błędne body: {e}")))?
-            .target_ids
+        let b = serde_json::from_slice::<StartBody>(&body)
+            .map_err(|e| ApiError::BadRequest(format!("Błędne body: {e}")))?;
+        (b.target_ids, b.vuln_check)
     };
-    match start_run(&st, Some(user.0.id), selection.as_deref()).await {
+    match start_run(&st, Some(user.0.id), selection.as_deref(), vuln_check).await {
         Ok(id) => {
-            let details = json!({ "selected": selection.as_ref().map(Vec::len) });
+            let details =
+                json!({ "selected": selection.as_ref().map(Vec::len), "vuln_check": vuln_check });
             record(&st, &user, &ip, "run.start", id, details).await?;
             Ok((StatusCode::ACCEPTED, Json(json!({ "run_id": id }))))
         }

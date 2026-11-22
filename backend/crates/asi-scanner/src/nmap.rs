@@ -165,6 +165,8 @@ struct XService {
     extrainfo: Option<String>,
     #[serde(rename = "@tunnel", default)]
     tunnel: Option<String>,
+    #[serde(rename = "cpe", default)]
+    cpe: Vec<String>,
 }
 
 pub fn parse_xml(xml: &str) -> Result<ChunkResult> {
@@ -200,6 +202,7 @@ pub fn parse_xml(xml: &str) -> Result<ChunkResult> {
                 o.version = s.version;
                 o.extra_info = s.extrainfo;
                 o.tunnel = s.tunnel;
+                o.cpe = s.cpe;
             }
             res.observations.push(o);
         }
@@ -220,7 +223,7 @@ mod tests {
     <hostnames><hostname name="web.lab" type="user"/><hostname name="ptr.lab" type="PTR"/></hostnames>
     <ports>
       <extraports state="closed" count="998"/>
-      <port protocol="tcp" portid="80"><state state="open"/><service name="http" product="nginx" version="1.24.0"/></port>
+      <port protocol="tcp" portid="80"><state state="open"/><service name="http" product="nginx" version="1.24.0"><cpe>cpe:/a:f5:nginx:1.24.0</cpe></service></port>
       <port protocol="tcp" portid="443"><state state="open"/><service name="http" tunnel="ssl"/></port>
     </ports>
   </host>
@@ -232,6 +235,8 @@ mod tests {
         assert_eq!(r.live_hosts, vec!["10.0.0.5"]);
         assert_eq!(r.observations.len(), 2);
         assert_eq!(r.observations[0].product.as_deref(), Some("nginx"));
+        assert_eq!(r.observations[0].cpe, vec!["cpe:/a:f5:nginx:1.24.0"]);
+        assert!(r.observations[1].cpe.is_empty());
         assert_eq!(r.observations[1].tunnel.as_deref(), Some("ssl"));
         assert_eq!(r.observations[0].hostname.as_deref(), Some("web.lab"));
         assert_eq!(

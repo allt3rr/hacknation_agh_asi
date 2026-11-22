@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/asi-core", "crates/asi-crypto", "crates/asi-fingerprint", "crates/asi-scanner", "crates/asi-db", "crates/asi-api", "bin/asi"]
+members = ["crates/asi-core", "crates/asi-crypto", "crates/asi-fingerprint", "crates/asi-scanner", "crates/asi-db", "crates/asi-vuln", "crates/asi-api", "bin/asi"]
 
 [workspace.package]
 edition = "2021"
@@ -15,6 +15,7 @@ asi-db = { path = "crates/asi-db" }
 asi-fingerprint = { path = "crates/asi-fingerprint" }
 asi-scanner = { path = "crates/asi-scanner" }
 asi-api = { path = "crates/asi-api" }
+asi-vuln = { path = "crates/asi-vuln" }
 
 aes-gcm = "0.10"
 anyhow = "1"

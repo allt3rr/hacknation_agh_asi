@@ -1,9 +1,9 @@
 //! Testy API wyników (`wyniki-i-ochrona-danych`): stronicowanie, redakcja, odsłonięcie, eksport/import,
 //! korekty, sygnatury i DefectDojo.
 
-use crate::defectdojo::DefectDojo;
 use crate::scans::ScanService;
 use crate::tests::{add_user, body, call, cookie_pair, login_as, prepared, PASSWORD};
+use crate::tests_vuln::{dd_config, mock_dd};
 use crate::{router, AppState};
 use asi_core::rbac;
 use asi_scanner::config::ScanConfig;
@@ -13,7 +13,6 @@ use axum::http::{header, Request, StatusCode};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
 
 const SECRET: &str = "tajny-123";
@@ -495,155 +494,26 @@ async fn signatures_api_validates_and_respects_roles(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "asi_db::MIGRATOR")]
-async fn defectdojo_export(db: PgPool) {
-    // atrapa DefectDojo: zapisuje nagłówek Authorization i surowe ciało multipart
-    let seen: Arc<Mutex<Option<(String, String)>>> = Arc::default();
-    let store = seen.clone();
-    let app = axum::Router::new().route(
-        "/api/v2/import-scan/",
-        axum::routing::post(move |headers: axum::http::HeaderMap, b: String| {
-            let store = store.clone();
-            async move {
-                let auth = headers
-                    .get("authorization")
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or("")
-                    .to_string();
-                *store.lock().unwrap() = Some((auth, b));
-                axum::Json(json!({ "test": 1 }))
-            }
-        }),
-    );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-
-    let st = state(&db).await;
+async fn defectdojo_export_is_redacted(db: PgPool) {
+    let (port, dd) = mock_dd().await;
+    let st = state(&db).await.with_defectdojo(Some(dd_config(port)));
     let editor = as_role(&st, &db, "ed", rbac::EDITOR).await;
     let analyst = as_role(&st, &db, "an", rbac::ANALYST).await;
-    let viewer = as_role(&st, &db, "vi", rbac::VIEWER).await;
     let mut row = wordpress_row("10.0.0.7", "Blog");
     row["http"]["cookies"] = json!([{ "name": "wordpress_logged_in", "attributes": ["HttpOnly"] }]);
     let run = import_json(&st, &editor, json!([row])).await;
-    let path = format!("/api/v1/runs/{run}/defectdojo");
-
-    assert_eq!(
-        call(&st, "POST", &path, Some(&analyst), None)
-            .await
-            .status(),
-        StatusCode::CONFLICT,
-        "brak konfiguracji"
-    );
-    let dd = DefectDojo {
-        url: format!("http://127.0.0.1:{port}"),
-        token: "tok-dd".into(),
-        engagement: 7,
-    };
-    let st = st.with_defectdojo(Some(dd));
-    assert_eq!(
-        call(&st, "POST", &path, Some(&viewer), None).await.status(),
-        StatusCode::FORBIDDEN
-    );
-    let res = call(&st, "POST", &path, Some(&analyst), None).await;
-    assert_eq!(res.status(), StatusCode::OK);
-    assert!(body(res).await["findings"].as_u64().unwrap() >= 1);
-
-    let (auth, payload) = seen
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("DefectDojo nie dostało żądania");
-    assert_eq!(auth, "Token tok-dd");
-    assert!(payload.contains("Generic Findings Import"));
-    assert!(payload.contains("WordPress na 10.0.0.7:80"));
-    assert!(!payload.contains(SECRET));
-}
-
-#[sqlx::test(migrator = "asi_db::MIGRATOR")]
-async fn scan_pushes_to_defectdojo_automatically(db: PgPool) {
-    let hits: Arc<Mutex<Vec<String>>> = Arc::default();
-    let store = hits.clone();
-    let app = axum::Router::new().route(
-        "/api/v2/import-scan/",
-        axum::routing::post(move |b: String| {
-            let store = store.clone();
-            async move {
-                store.lock().unwrap().push(b);
-                axum::Json(json!({ "test": 1 }))
-            }
-        }),
-    );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-
-    let fake = FakeRunner {
-        open_port: 22,
-        ..Default::default()
-    };
-    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../signatures"));
-    let cfg = ScanConfig {
-        recheck_missing: false,
-        ..Default::default()
-    };
-    let svc = ScanService::new(Ok(cfg.clone()), AnyRunner::Fake(fake.clone()), dir.clone());
-    let dd = |port: u16| {
-        Some(DefectDojo {
-            url: format!("http://127.0.0.1:{port}"),
-            token: "t".into(),
-            engagement: 1,
-        })
-    };
-    let st = prepared(&db)
-        .await
-        .with_scans(svc)
-        .with_defectdojo(dd(port));
-    let admin = cookie_pair(&login_as(&st, "admin", "fixture-password").await);
-    call(
+    let res = call(
         &st,
         "POST",
-        "/api/v1/targets",
-        Some(&admin),
-        Some(json!({ "text": "10.0.0.1" })),
+        &format!("/api/v1/runs/{run}/defectdojo"),
+        Some(&analyst),
+        None,
     )
     .await;
-
-    let wait_done = |st: AppState, cookie: String| async move {
-        for _ in 0..200 {
-            let runs = body(call(&st, "GET", "/api/v1/runs", Some(&cookie), None).await).await;
-            if runs[0]["status"] != "running" {
-                return runs[0]["status"].as_str().unwrap().to_string();
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-        panic!("skan nie zakończył się");
-    };
-
-    assert_eq!(
-        call(&st, "POST", "/api/v1/runs", Some(&admin), None)
-            .await
-            .status(),
-        StatusCode::ACCEPTED
-    );
-    assert_eq!(wait_done(st.clone(), admin.clone()).await, "done");
-    for _ in 0..100 {
-        if !hits.lock().unwrap().is_empty() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    let sent = hits.lock().unwrap().clone();
-    assert_eq!(sent.len(), 1, "jedna automatyczna wysyłka po skanie");
-    assert!(sent[0].contains("Generic Findings Import"));
-
-    // DefectDojo niedostępne: skan nadal kończy się sukcesem
-    let svc = ScanService::new(Ok(cfg), AnyRunner::Fake(fake), dir);
-    let st = st.with_scans(svc).with_defectdojo(dd(1));
-    assert_eq!(
-        call(&st, "POST", "/api/v1/runs", Some(&admin), None)
-            .await
-            .status(),
-        StatusCode::ACCEPTED
-    );
-    assert_eq!(wait_done(st.clone(), admin.clone()).await, "done");
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(body(res).await["findings"].as_u64().unwrap() >= 1);
+    let d = dd.lock().unwrap();
+    let payload = &d.imports[0].1;
+    assert!(payload.contains("WordPress na 10.0.0.7:80"));
+    assert!(!payload.contains(SECRET));
 }

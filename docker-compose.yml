@@ -1,7 +1,7 @@
 # Uruchomienie:
 #   docker compose up -d --build                    baza + backend ze skanerem i interfejsem (http://127.0.0.1:8080)
 #   docker compose --profile lab up -d --build      to samo plus laboratorium (sieć 172.30.100.0/24)
-# Pierwszy start wymaga ASI_ADMIN_PASSWORD. Zmienne: ASI_PORT, ASI_PROJECT, ASI_DB_PASSWORD, ASI_SCAN_CONFIG, ASI_DD_*.
+# Pierwszy start wymaga ASI_ADMIN_PASSWORD. Zmienne: ASI_PORT, ASI_PROJECT, ASI_DB_PASSWORD, ASI_SCAN_CONFIG, ASI_DD_*, ASI_NVD_API_KEY.
 name: ${ASI_PROJECT:-asi}
 
 services:
@@ -49,7 +49,9 @@ services:
       ASI_SESSION_TTL_HOURS: ${ASI_SESSION_TTL_HOURS:-12}
       ASI_DD_URL: ${ASI_DD_URL:-}
       ASI_DD_TOKEN: ${ASI_DD_TOKEN:-}
-      ASI_DD_ENGAGEMENT: ${ASI_DD_ENGAGEMENT:-}
+      ASI_DD_PRODUCT: ${ASI_DD_PRODUCT:-}
+      # opcjonalny klucz NVD API: wyższy limit zapytań przy sprawdzaniu podatności
+      ASI_NVD_API_KEY: ${ASI_NVD_API_KEY:-}
     volumes:
       - asi-keys:/run/asi-keys:ro
       # konfigurację skanu i sygnatury można zmieniać bez przebudowy obrazu

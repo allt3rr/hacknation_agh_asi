@@ -62,6 +62,61 @@ export interface Run {
   /** Cele z zakończonych podgrup (≤ hosts_total). */
   hosts_done: number;
   created_at: string;
+  vuln_state: VulnState;
+  vuln_reason: string | null;
+  /** Po sprawdzeniu: services, identified, unidentified, vulnerabilities, confirmed, verify. */
+  vuln_summary: Partial<Record<"services" | "identified" | "unidentified" | "vulnerabilities" | "confirmed", number>>;
+  /** Ostatnia wysyłka do DefectDojo (automatyczna albo ręczna); null = jeszcze nie było. */
+  dd_export: DefectDojoExport | null;
+}
+
+export interface DefectDojoExport {
+  at: string;
+  /** inventory = same wyniki skanu, all = wyniki z opisem CVE. */
+  content: "inventory" | "all";
+  findings?: number;
+  engagements?: number;
+  failed?: string[];
+  error: string | null;
+}
+
+export type VulnState = "none" | "pending_decision" | "running" | "done" | "failed" | "skipped";
+export type VulnMode = "auto" | "ask" | "off";
+export type Severity = "Critical" | "High" | "Medium" | "Low" | "Info";
+
+export interface Vulnerability {
+  ip: string;
+  port: number;
+  proto: string;
+  cve_id: string;
+  cvss_score: number | null;
+  cvss_vector: string | null;
+  severity: Severity;
+  /** version_match = korelacja wersji (potencjalna), confirmed = potwierdzona sondą. */
+  evidence: "version_match" | "confirmed";
+  component: string;
+  version: string;
+  description: string;
+  published: string | null;
+}
+
+export interface DefectDojoResult {
+  findings: number;
+  engagements: { ip: string; engagement_id: number; created: boolean }[];
+  failed: { ip: string; error: string }[];
+}
+
+export interface VulnPage {
+  total: number;
+  items: Vulnerability[];
+  summary: {
+    state: VulnState;
+    reason: string | null;
+    by_severity: Record<Severity, number>;
+    confirmed: number;
+    unidentified: number | null;
+    services: number | null;
+  };
 }
 
 export type ChangeKind = "new" | "gone" | "changed" | "host_inactive" | "host_returned";

@@ -3,6 +3,8 @@
 Narzędzie do cyklicznego, bezpiecznego discovery scanu dużych sieci (powyżej 10 000 adresów IP).
 Wykrywa aktywne hosty, usługi, technologie webowe, CMS-y, panele, nagłówki i ciasteczka, zapisuje
 zmiany między przebiegami, pozwala trwale korygować wyniki, eksportuje JSON/CSV i do DefectDojo.
+Po skanie sprawdza znane podatności usług (CVE z NVD, ocena CVSS, opcjonalne potwierdzenie
+nieinwazyjnymi szablonami nuclei).
 Ma cztery role, szyfrowanie wrażliwych pól i dziennik audytu.
 
 Backend: Rust ([`backend/`](backend/README.md) — Axum, sqlx, PostgreSQL 16). Frontend: React + TypeScript
@@ -30,7 +32,8 @@ Rotację hasła bazy skoordynuj ze zmianą hasła tej roli. Hasło konta aplikac
 | `ASI_DB_PASSWORD` | wymagane | hasło bazy |
 | `ASI_SCAN_CONFIG` | `backend/config/scan.toml` | plik konfiguracji skanu (porty, limity, okna czasowe) |
 | `ASI_SESSION_TTL_HOURS`, `ASI_COOKIE_SECURE` | `12`, `false` | sesja; `true` za HTTPS |
-| `ASI_DD_URL`, `ASI_DD_TOKEN`, `ASI_DD_ENGAGEMENT` | — | DefectDojo: wyniki są wysyłane automatycznie po każdym skanie (błąd tylko w logu) i ręcznie przyciskiem; DefectDojo na hoście: `http://host.docker.internal:8081` |
+| `ASI_DD_URL`, `ASI_DD_TOKEN`, `ASI_DD_PRODUCT` | — | DefectDojo (id produktu w `ASI_DD_PRODUCT`): wyniki są wysyłane automatycznie po decyzji o CVE: po zatwierdzonym sprawdzaniu info z opisem CVE (po jego zakończeniu), po odrzuceniu lub w trybie `off` samo info; błąd tylko w logu. Po sprawdzeniu CVE przycisk **CVE → DefectDojo** w tabeli Przebiegi wysyła je ponownie (`POST /api/v1/runs/{id}/defectdojo`). Każdy IP ma własny engagement `ASI <ip>` w statusie „In Progress”: istniejący jest używany ponownie, brakujący tworzony. DefectDojo na hoście: `http://host.docker.internal:8081`. `ASI_DD_ENGAGEMENT` nie jest już używane |
+| `ASI_NVD_API_KEY` | — | opcjonalny klucz NVD API (wyższy limit zapytań przy sprawdzaniu podatności) |
 
 ## Laboratorium i scenariusz dwóch przebiegów
 
@@ -55,7 +58,21 @@ Sieć wewnętrzna `172.30.100.0/24` (bez dostępu do internetu):
 3. Jako analityk oznacz usługę (status `false_positive`, notatka) — korekta jest trwała.
 4. Zmień lab, np. `docker compose stop lab-grafana`, i uruchom drugi skan: zmiany `gone`, host `unstable`;
    po `inactive_after_misses` przebiegach `inactive`. Korekta z kroku 3 jest widoczna w nowym przebiegu.
-5. Eksport CSV/JSON i (opcjonalnie) DefectDojo w zakładce Skany; viewer nie widzi akcji, API zwraca 403.
+5. Eksport CSV/JSON w zakładce Skany; viewer nie widzi akcji, API zwraca 403.
+6. Podatności: po skanie (tryb „zapytaj”) pojawia się pytanie **Sprawdzić podatności?**. Po akceptacji ASI
+   ustala produkt i wersję usług (nmap `-sV`, technologie), pobiera CVE z NVD i liczy severity z CVSS;
+   w labie (`verify = true`) potwierdza je nieinwazyjnymi szablonami nuclei. Wynik: przycisk **CVE** w tabeli
+   Przebiegi. Do DefectDojo (engagement per IP) wyniki trafiają automatycznie po tej decyzji: z opisem CVE
+   po zakończonym sprawdzaniu albo samo info po **Pomiń**.
+
+### Sprawdzanie podatności
+
+Sekcja `[vuln]` w pliku konfiguracji skanu: `mode = "ask" | "auto" | "off"` (domyślnie `ask`, nadpisywane przy
+starcie skanu), `verify` (nuclei), `nvd_url`, `cache_hours`, `verify_rate`. Korelacja wersji ma dowód
+`version_match` (w DefectDojo `verified=false`, możliwe poprawki wsteczne dystrybucji), trafienie szablonu —
+`confirmed` (`verified=true`). Nuclei uruchamiane jest bez szablonów `dos`, `fuzz`, `intrusive`, `bruteforce`,
+bez OOB (`-ni`), z limitem `verify_rate` i tylko na usługach przebiegu w aktualnym zakresie celów i portów.
+Usługi oznaczone jako `false_positive` nie mają podatności na liście ani w DefectDojo.
 
 ## Praca lokalna bez Dockera
 
@@ -84,7 +101,8 @@ Kontrole: w `backend/` — `cargo fmt --check`, `cargo clippy --all-targets -- -
 | CMS, framework, serwer, IoT, staging, panele | `signatures/default.yaml`, `asi-fingerprint` |
 | Własne sygnatury | `/api/v1/signatures`, strona Sygnatury |
 | Porównanie przebiegów, hosty niestabilne | `asi-core/diff.rs`, `asi-db/results.rs` (`unstable` → `inactive`) |
-| Import i eksport JSON/CSV, DefectDojo | `/api/v1/results/import`, `/runs/{id}/export`, `/runs/{id}/defectdojo` |
+| Import i eksport JSON/CSV, DefectDojo (engagement per IP) | `/api/v1/results/import`, `/runs/{id}/export`, `/runs/{id}/defectdojo` |
+| Podatności usług: CVE, CVSS, severity | `asi-core/vuln.rs`, `asi-vuln` (NVD), `asi-scanner/nuclei.rs`, `/runs/{id}/vuln-check`, `/runs/{id}/vuln-check/skip`, `/runs/{id}/vulnerabilities` |
 | Edycja niezależna od skanu | korekty `/api/v1/overrides` nakładane na widok i eksport |
 | RBAC, 4 role | `asi-core/rbac.rs` (macierz §14.1), kontrola w każdym handlerze |
 | Szyfrowanie pól | `asi-crypto` (AES-256-GCM, AAD per rekord), redakcja sekretów w API |

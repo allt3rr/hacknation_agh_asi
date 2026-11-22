@@ -95,11 +95,21 @@ async fn main() -> Result<()> {
             let runner = asi_api::scans::ScanService::nmap_runner(
                 scan_cfg.as_ref().unwrap_or(&Default::default()),
             );
-            let state = state.with_scans(asi_api::scans::ScanService::new(
-                scan_cfg,
-                runner,
-                signatures_dir,
-            ));
+            let defectdojo = asi_api::defectdojo::DefectDojo::from_env(|k| std::env::var(k).ok());
+            if defectdojo.is_none() {
+                tracing::info!(
+                    "DefectDojo wyłączone (wymagane ASI_DD_URL, ASI_DD_TOKEN, ASI_DD_PRODUCT)"
+                );
+            }
+            let state = state
+                .with_scans(asi_api::scans::ScanService::new(
+                    scan_cfg,
+                    runner,
+                    signatures_dir,
+                ))
+                .with_defectdojo(defectdojo);
+            // po restarcie żadne sprawdzanie podatności nie trwa
+            asi_db::vulns::recover_orphans(&state.db).await?;
             tokio::spawn(asi_api::scans::scheduler(state.clone()));
             let listener = tokio::net::TcpListener::bind(bind)
                 .await
