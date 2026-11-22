@@ -246,7 +246,7 @@ verify = false   # potwierdzanie szablonami nuclei
 
 ## Role i uprawnienia
 
-| Uprawnienie | admin | editor | analyst | viewer |
+| Uprawnienie | Administracja | Dodawanie, usuwanie, modyfikacja | Modyfikacja i odczyt | Odczyt |
 |---|:-:|:-:|:-:|:-:|
 | Odczyt i eksport | ✅ | ✅ | ✅ | ✅ |
 | Korekty wyników, uruchamianie skanów, DefectDojo | ✅ | ✅ | ❌ | ❌ |
