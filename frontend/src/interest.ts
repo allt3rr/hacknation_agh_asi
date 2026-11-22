@@ -1,5 +1,6 @@
 // Ocena "ciekawości" usługi dla analityka (0-100). Heurystyka po stronie interfejsu:
 // waga kategorii detekcji × pewność, plus priorytet nadany w korekcie wyniku (severity).
+// Ta sama heurystyka jest w backend/crates/asi-core/src/interest.rs (raport PDF): zmieniaj obie.
 
 import type { ResultRow } from "./types";
 

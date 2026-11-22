@@ -6,6 +6,7 @@ pub mod defectdojo;
 mod error;
 mod login_guard;
 mod manage;
+mod report;
 mod results;
 mod routes;
 pub mod scans;
@@ -122,6 +123,7 @@ pub fn router(state: AppState) -> Router {
         .route("/runs/{id}/observations", get(results::observations))
         .route("/runs/{id}/changes", get(results::changes))
         .route("/runs/{id}/export", get(results::export_run))
+        .route("/runs/{id}/report.pdf", get(results::report_pdf))
         .route("/runs/{id}/defectdojo", post(defectdojo::export))
         .route("/observations/{id}/secrets", get(results::secrets))
         .route("/dashboard", get(results::dashboard))

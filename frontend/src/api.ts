@@ -127,6 +127,12 @@ export const api = {
       const response = await send("GET", `/runs/${id}/export?format=${format}`);
       return response.blob();
     },
+    /** Raport PDF z backendu; nazwa pliku z nagłówka Content-Disposition. */
+    reportPdf: async (id: string) => {
+      const response = await send("GET", `/runs/${id}/report.pdf`);
+      const name = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") ?? "")?.[1] ?? `asi-raport-${id}.pdf`;
+      return { blob: await response.blob(), name };
+    },
     sendToDefectDojo: (id: string) => request<{ findings: number }>("POST", `/runs/${id}/defectdojo`),
     importResults: (format: FileFormat, content: string) =>
       request<{ run_id: string; observations: number; changes: number }>("POST", `/results/import?format=${format}`, {

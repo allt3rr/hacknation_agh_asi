@@ -13,6 +13,8 @@ backend/*
 !backend/migrations/**
 !backend/signatures/
 !backend/signatures/**
+!backend/assets/
+!backend/assets/**
 !frontend/
 frontend/*
 !frontend/package.json

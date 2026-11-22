@@ -15,6 +15,7 @@ asi-fingerprint.workspace = true
 asi-scanner.workspace = true
 axum.workspace = true
 axum-extra.workspace = true
+genpdf.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde-saphyr.workspace = true

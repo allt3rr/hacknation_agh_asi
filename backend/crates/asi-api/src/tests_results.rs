@@ -647,3 +647,77 @@ async fn scan_pushes_to_defectdojo_automatically(db: PgPool) {
     );
     assert_eq!(wait_done(st.clone(), admin.clone()).await, "done");
 }
+
+#[sqlx::test(migrator = "asi_db::MIGRATOR")]
+async fn run_report_pdf_download_and_errors(db: PgPool) {
+    let st = state(&db).await;
+    let admin = cookie_pair(&login_as(&st, "admin", "fixture-password").await);
+    let viewer = as_role(&st, &db, "vi", rbac::VIEWER).await;
+    let run = import_json(
+        &st,
+        &admin,
+        json!([
+            wordpress_row("10.0.0.1", "Zażółć gęślą jaźń"),
+            wordpress_row("10.0.0.2", &"A".repeat(300))
+        ]),
+    )
+    .await;
+
+    let res = raw(
+        &st,
+        "GET",
+        &format!("/api/v1/runs/{run}/report.pdf"),
+        &viewer,
+        String::new(),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()[header::CONTENT_TYPE], "application/pdf");
+    let disposition = res.headers()[header::CONTENT_DISPOSITION]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        disposition.starts_with("attachment; filename=\"asi-raport-")
+            && disposition.ends_with(&format!("-{run}.pdf\"")),
+        "{disposition}"
+    );
+    let bytes = axum::body::to_bytes(res.into_body(), 1 << 24)
+        .await
+        .unwrap();
+    assert!(bytes.starts_with(b"%PDF-"));
+
+    let anon = call(
+        &st,
+        "GET",
+        &format!("/api/v1/runs/{run}/report.pdf"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
+    let missing = raw(
+        &st,
+        "GET",
+        "/api/v1/runs/00000000-0000-0000-0000-000000000000/report.pdf",
+        &viewer,
+        String::new(),
+    )
+    .await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    sqlx::query("UPDATE scan_runs SET status = 'running' WHERE id = $1::uuid")
+        .bind(&run)
+        .execute(&db)
+        .await
+        .unwrap();
+    let running = raw(
+        &st,
+        "GET",
+        &format!("/api/v1/runs/{run}/report.pdf"),
+        &viewer,
+        String::new(),
+    )
+    .await;
+    assert_eq!(running.status(), StatusCode::CONFLICT);
+}

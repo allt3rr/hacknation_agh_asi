@@ -2,6 +2,7 @@
 
 pub mod diff;
 pub mod export;
+pub mod interest;
 pub mod model;
 pub mod password;
 pub mod rbac;

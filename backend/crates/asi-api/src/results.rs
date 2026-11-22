@@ -522,3 +522,56 @@ pub async fn delete_signature(
     .await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// Raport PDF przebiegu do pobrania (uprawnienie i limit równoległości jak eksport JSON/CSV).
+pub async fn report_pdf(
+    State(st): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Response> {
+    user.require(rbac::EXPORT)?;
+    let run = runs::get_run(&st.db, id).await?.ok_or(ApiError::NotFound)?;
+    if matches!(run.status.as_str(), "running" | "queued") {
+        return Err(ApiError::Conflict(
+            "Przebieg jeszcze trwa: raport będzie dostępny po jego zakończeniu".into(),
+        ));
+    }
+    let _permit = st
+        .exports
+        .try_acquire()
+        .map_err(|_| ApiError::Conflict("Eksport w toku".into()))?;
+    let rows = all_rows(&st, id).await?;
+    let mut changes = Vec::new();
+    loop {
+        let (total, page) =
+            views::changes_page(&st.db, id, None, PAGE_MAX, changes.len() as i64).await?;
+        let done = page.is_empty();
+        changes.extend(page);
+        if done || changes.len() as i64 >= total {
+            break;
+        }
+    }
+    let day = run.started_at.unwrap_or(run.created_at).date().to_string();
+    let username = user.0.username.clone();
+    // składanie PDF jest CPU-bound: poza pulą wątków asynchronicznych
+    let pdf = tokio::task::spawn_blocking(move || {
+        crate::report::render(&crate::report::ReportInput {
+            run: &run,
+            rows: &rows,
+            changes: &changes,
+            generated_by: &username,
+            now: time::OffsetDateTime::now_utc(),
+        })
+    })
+    .await
+    .map_err(anyhow::Error::from)??;
+    let disposition = format!("attachment; filename=\"asi-raport-{day}-{id}.pdf\"");
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/pdf".to_string()),
+            (header::CONTENT_DISPOSITION, disposition),
+        ],
+        pdf,
+    )
+        .into_response())
+}

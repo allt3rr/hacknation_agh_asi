@@ -9,7 +9,6 @@ import { ScanProgress } from "../components/ScanProgress";
 import { TargetPicker } from "../components/TargetPicker";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
-import { printRunReport } from "../report";
 import type { Change, Page, ResultRow, Run, RunStatus, Session, Target } from "../types";
 import { BTN_SECONDARY, STATUS_LABELS, coverageText, downloadBlob, fileFormat, formatDate, formatDuration } from "../utils";
 
@@ -85,6 +84,18 @@ export function RunsPage({ session }: { session: Session }) {
     run(async () => setDetails({ kind: "services", run: r, offset, page: await api.runs.observations(r.id, offset) }));
 
   const showChanges = (r: Run) => run(async () => setDetails({ kind: "changes", run: r, page: await api.runs.changes(r.id) }));
+
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null);
+  const downloadReport = (r: Run) =>
+    run(async () => {
+      setPdfBusy(r.id);
+      try {
+        const { blob, name } = await api.runs.reportPdf(r.id);
+        downloadBlob(blob, name);
+      } finally {
+        setPdfBusy(null);
+      }
+    });
 
   const exportRun = (r: Run, format: "csv" | "json") =>
     run(async () => downloadBlob(await api.runs.exportFile(r.id, format), `asi-${r.id}.${format}`));
@@ -163,12 +174,13 @@ export function RunsPage({ session }: { session: Session }) {
                         )}
                         <button
                           className={BTN_SECONDARY}
-                          title="Raport do druku lub zapisu jako PDF"
-                          aria-label={`Wygeneruj raport PDF z przebiegu ${name}`}
-                          disabled={r.status === "queued"}
-                          onClick={() => run(() => printRunReport(r, session))}
+                          title="Pobierz raport PDF"
+                          aria-label={`Pobierz raport PDF z przebiegu ${name}`}
+                          aria-busy={pdfBusy === r.id}
+                          disabled={r.status === "queued" || pdfBusy !== null}
+                          onClick={() => downloadReport(r)}
                         >
-                          PDF
+                          {pdfBusy === r.id ? "PDF…" : "PDF"}
                         </button>
                         {can(session, "integrations.export") && (
                           <button className={BTN_SECONDARY} aria-label={`Wyślij przebieg ${name} do DefectDojo`} onClick={() => sendToDefectDojo(r)}>DefectDojo</button>
