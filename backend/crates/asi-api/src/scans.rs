@@ -8,8 +8,11 @@ use asi_core::targets::{expand, Target, TargetKind};
 use asi_db::audit::{self, Entry};
 use asi_db::results::{publish, PublishInput, PublishOutcome};
 use asi_db::runs::{self, RunView, HEARTBEAT_SECS};
+use asi_db::schedule::{ScheduleInput, ScheduleView};
 use asi_fingerprint::SignatureSet;
-use asi_scanner::config::{window_decision, ScanConfig, ScheduleConfig, VulnMode, WindowDecision};
+use asi_scanner::config::{
+    window_decision, ScanConfig, ScheduleConfig, VulnMode, WindowConfig, WindowDecision,
+};
 use asi_scanner::http::Limits;
 use asi_scanner::nmap::{AnyRunner, NmapOptions, NmapRunner};
 use asi_scanner::{CancellationToken, Plan, Scanner};
@@ -22,7 +25,7 @@ use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use time::{OffsetDateTime, PrimitiveDateTime};
 use tokio::time::Instant;
@@ -39,8 +42,6 @@ pub struct ScanService {
     pub owner: String,
     pub clock: Clock,
     active: Mutex<HashMap<Uuid, CancellationToken>>,
-    /// Harmonogram (okna, częstotliwość): z pliku, a po zapisie z interfejsu z bazy. Czytany przy każdym starcie.
-    schedule: RwLock<ScheduleConfig>,
 }
 
 impl ScanService {
@@ -49,7 +50,6 @@ impl ScanService {
         runner: AnyRunner,
         signatures_dir: PathBuf,
     ) -> Self {
-        let schedule = cfg.as_ref().map(|c| c.schedule.clone()).unwrap_or_default();
         Self {
             cfg,
             runner: Arc::new(runner),
@@ -61,16 +61,7 @@ impl ScanService {
                     .map(|t| PrimitiveDateTime::new(t.date(), t.time()))
             }),
             active: Mutex::default(),
-            schedule: RwLock::new(schedule),
         }
-    }
-
-    pub fn schedule(&self) -> ScheduleConfig {
-        self.schedule.read().unwrap().clone()
-    }
-
-    fn set_schedule(&self, schedule: ScheduleConfig) {
-        *self.schedule.write().unwrap() = schedule;
     }
 
     pub fn with_clock(mut self, clock: Clock) -> Self {
@@ -101,11 +92,14 @@ impl Default for ScanService {
 /// Start przebiegu. `Err(msg)` = odmowa (409): trwa skan, poza oknem, błędna konfiguracja, brak celów.
 /// `selection`: tylko te cele (id z `targets`); `None` = wszystkie niewykluczone (harmonogram).
 /// `vuln_mode`: sprawdzanie podatności po publikacji; `None` = z konfiguracji (`[vuln] mode`).
+/// `schedule`: pozycja harmonogramu (jej okna dają termin, id i nazwa trafiają do profilu);
+/// start ręczny (`None`) nie jest ograniczany oknami.
 pub async fn start_run(
     st: &AppState,
     triggered_by: Option<Uuid>,
     selection: Option<&[Uuid]>,
     vuln_mode: Option<VulnMode>,
+    schedule: Option<&ScheduleView>,
 ) -> Result<Uuid, StartError> {
     if selection.is_some_and(|ids| ids.is_empty()) {
         return Err(StartError::BadRequest("Pusta lista celów".into()));
@@ -115,10 +109,11 @@ pub async fn start_run(
         .cfg
         .clone()
         .map_err(|e| StartError::Refused(format!("Błędna konfiguracja skanu: {e}")))?;
-    let windows = svc
-        .schedule()
-        .windows()
-        .map_err(|e| StartError::Refused(format!("Błędne okno czasowe: {e:#}")))?;
+    let windows = match schedule {
+        Some(s) => parse_windows(&s.windows)
+            .map_err(|e| StartError::Refused(format!("Błędne okno czasowe: {e}")))?,
+        None => Vec::new(),
+    };
     let now = (svc.clock)().ok_or_else(|| StartError::Refused("Nieznany czas lokalny".into()))?;
     let deadline = match window_decision(&windows, now) {
         WindowDecision::Unrestricted => None,
@@ -160,7 +155,8 @@ pub async fn start_run(
 
     let vuln_mode = vuln_mode.unwrap_or(cfg.vuln.mode);
     let profile = json!({ "config": cfg, "targets": expanded.len(), "resumed": attempts.len(),
-                          "selected": selection.map(<[Uuid]>::len), "vuln_mode": vuln_mode });
+                          "selected": selection.map(<[Uuid]>::len), "vuln_mode": vuln_mode,
+                          "schedule_id": schedule.map(|s| s.id), "schedule_name": schedule.map(|s| &s.name) });
     let run_id = runs::reserve_scan(&st.db, &svc.owner, triggered_by, &profile)
         .await?
         .ok_or_else(|| StartError::Refused("Trwa inny skan".into()))?;
@@ -240,7 +236,10 @@ pub(crate) async fn load_targets(
 }
 
 /// Wbudowane sygnatury z katalogu + zapisane w bazie (niepoprawne zapisane są pomijane).
-async fn load_signatures(st: &AppState, svc: &ScanService) -> anyhow::Result<SignatureSet> {
+pub(crate) async fn load_signatures(
+    st: &AppState,
+    svc: &ScanService,
+) -> anyhow::Result<SignatureSet> {
     let builtin = SignatureSet::load_dir(&svc.signatures_dir)?;
     let stored: Vec<(String, String)> = sqlx::query_as(
         "SELECT DISTINCT ON (slug) slug, yaml FROM rules WHERE enabled ORDER BY slug, version DESC",
@@ -369,28 +368,42 @@ pub fn is_due(
     }
 }
 
-/// Wczytuje harmonogram zapisany z interfejsu (jeśli jest) w miejsce sekcji [schedule] z pliku.
-pub async fn load_saved_schedule(st: &AppState) {
-    match asi_db::schedule::load(&st.db).await {
-        Ok(Some(value)) => match serde_json::from_value::<ScheduleConfig>(value) {
-            Ok(saved) if validate_schedule(&saved).is_ok() => st.scans.set_schedule(saved),
-            _ => tracing::error!(
-                "zapisany harmonogram jest niepoprawny; używam konfiguracji z pliku"
-            ),
-        },
-        Ok(None) => {}
-        Err(e) => tracing::error!(error = %e, "harmonogram: błąd odczytu bazy"),
+/// Okna pozycji z JSON-a; błędne okno to błąd całej pozycji, nie pominięcie.
+fn parse_windows(value: &serde_json::Value) -> Result<Vec<asi_scanner::config::Window>, String> {
+    let windows: Vec<WindowConfig> =
+        serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+    ScheduleConfig {
+        windows,
+        ..Default::default()
     }
+    .windows()
+    .map_err(|e| format!("{e:#}"))
 }
 
-/// Pętla harmonogramu w `asi serve`. Ustawienia są czytane co minutę, więc zmiana z interfejsu
+/// Włączone i należne pozycje, najpierw te z najstarszym ostatnim przebiegiem (brak = najstarszy).
+pub fn due_schedules(all: &[ScheduleView], now: OffsetDateTime) -> Vec<&ScheduleView> {
+    let mut due: Vec<&ScheduleView> = all
+        .iter()
+        .filter(|s| s.enabled)
+        .filter(|s| {
+            let last = s.last_run_at.zip(s.last_status.clone());
+            is_due(last, s.every_hours.into(), now)
+        })
+        .collect();
+    due.sort_by_key(|s| s.last_run_at);
+    due
+}
+
+/// Pętla harmonogramu w `asi serve`. Pozycje są czytane z bazy co minutę, więc zmiana z interfejsu
 /// działa bez restartu. Błędna konfiguracja skanu blokuje harmonogram (z logiem).
 pub async fn scheduler(st: AppState) {
     let scan_ok = st.scans.cfg.is_ok();
     if !scan_ok {
         tracing::error!("harmonogram wyłączony: błędna konfiguracja skanu");
     }
-    load_saved_schedule(&st).await;
+    if st.scans.cfg.as_ref().is_ok_and(|c| c.schedule.enabled) {
+        tracing::warn!("sekcja [schedule] w konfiguracji skanu jest ignorowana; harmonogram ustawia się w interfejsie (Skany → Harmonogram)");
+    }
     let mut tick = tokio::time::interval(Duration::from_secs(60));
     loop {
         tick.tick().await;
@@ -403,69 +416,186 @@ pub async fn scheduler(st: AppState) {
         if !scan_ok {
             continue;
         }
-        let schedule = st.scans.schedule();
-        if !schedule.enabled {
-            continue;
-        }
-        let last = match runs::last_scan(&st.db).await {
-            Ok(l) => l,
-            Err(e) => {
-                tracing::error!(error = %e, "harmonogram: błąd odczytu bazy");
-                continue;
-            }
-        };
-        if !is_due(last, schedule.every_hours, OffsetDateTime::now_utc()) {
-            continue;
-        }
-        match start_run(&st, None, None, None).await {
-            Ok(id) => tracing::info!(%id, "harmonogram: start skanu"),
-            Err(StartError::Refused(msg) | StartError::BadRequest(msg)) => {
-                tracing::debug!(%msg, "harmonogram: skan nie wystartował")
-            }
-            Err(StartError::Internal(e)) => tracing::error!(error = %e, "harmonogram: błąd startu"),
+        if let Err(e) = run_due(&st).await {
+            tracing::error!(error = %e, "harmonogram: błąd odczytu bazy");
         }
     }
+}
+
+/// Jeden obieg planisty: startuje pierwszą należną pozycję, która może ruszyć (w oknie, ma cele).
+pub async fn run_due(st: &AppState) -> anyhow::Result<Option<Uuid>> {
+    let all = asi_db::schedule::list(&st.db).await?;
+    for s in due_schedules(&all, OffsetDateTime::now_utc()) {
+        // usunięty cel nie może dać 400 i zablokować pozycji
+        let ids = asi_db::schedule::existing_targets(&st.db, &s.target_ids).await?;
+        if ids.is_empty() {
+            tracing::warn!(schedule = %s.name, "harmonogram: pozycja bez istniejących celów");
+            continue;
+        }
+        let vuln = serde_json::from_value(json!(s.vuln_check)).ok();
+        match start_run(st, None, Some(&ids), vuln, Some(s)).await {
+            Ok(id) => {
+                tracing::info!(%id, schedule = %s.name, "harmonogram: start skanu");
+                return Ok(Some(id));
+            }
+            Err(StartError::Refused(msg) | StartError::BadRequest(msg)) => {
+                tracing::debug!(%msg, schedule = %s.name, "harmonogram: skan nie wystartował")
+            }
+            Err(StartError::Internal(e)) => {
+                tracing::error!(error = %e, schedule = %s.name, "harmonogram: błąd startu")
+            }
+        }
+    }
+    Ok(None)
 }
 
 // --- trasy ------------------------------------------------------------------------
 
-/// Częstotliwość: od 1 godziny do 30 dni. Okna muszą się parsować (godziny HH:MM, dni mon..sun).
-fn validate_schedule(s: &ScheduleConfig) -> Result<(), String> {
-    if !(1..=720).contains(&s.every_hours) {
-        return Err("Częstotliwość musi wynosić od 1 do 720 godzin".into());
+#[derive(Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScheduleBody {
+    name: String,
+    #[serde(default = "enabled_default")]
+    enabled: bool,
+    every_hours: i32,
+    #[serde(default)]
+    windows: Vec<WindowConfig>,
+    target_ids: Vec<Uuid>,
+    #[serde(default)]
+    vuln_check: VulnMode,
+}
+
+fn enabled_default() -> bool {
+    true
+}
+
+/// Nazwa 1–100 znaków, częstotliwość 1–720 h, poprawne okna, co najmniej jeden istniejący cel.
+async fn validate_schedule(st: &AppState, b: &ScheduleBody) -> ApiResult<()> {
+    let name = b.name.trim();
+    if name.is_empty() || name.chars().count() > 100 {
+        return Err(ApiError::BadRequest(
+            "Nazwa musi mieć od 1 do 100 znaków".into(),
+        ));
     }
-    s.windows().map(|_| ()).map_err(|e| format!("{e:#}"))
+    if !(1..=720).contains(&b.every_hours) {
+        return Err(ApiError::BadRequest(
+            "Częstotliwość musi wynosić od 1 do 720 godzin".into(),
+        ));
+    }
+    ScheduleConfig {
+        windows: b.windows.clone(),
+        ..Default::default()
+    }
+    .windows()
+    .map_err(|e| ApiError::BadRequest(format!("{e:#}")))?;
+    if b.target_ids.is_empty() {
+        return Err(ApiError::BadRequest("Wybierz co najmniej jeden cel".into()));
+    }
+    let unique: HashSet<Uuid> = b.target_ids.iter().copied().collect();
+    let existing = asi_db::schedule::existing_targets(&st.db, &b.target_ids).await?;
+    if existing.len() != unique.len() {
+        return Err(ApiError::BadRequest("Nieznany cel w target_ids".into()));
+    }
+    Ok(())
 }
 
-pub async fn get_schedule(
-    State(st): State<AppState>,
-    user: AuthUser,
-) -> ApiResult<Json<ScheduleConfig>> {
-    user.require(rbac::READ)?;
-    Ok(Json(st.scans.schedule()))
-}
-
-pub async fn put_schedule(
-    State(st): State<AppState>,
-    user: AuthUser,
-    ip: ClientIp,
-    Json(schedule): Json<ScheduleConfig>,
-) -> ApiResult<StatusCode> {
+async fn save_schedule(
+    st: &AppState,
+    user: &AuthUser,
+    ip: &ClientIp,
+    id: Option<Uuid>,
+    b: ScheduleBody,
+) -> ApiResult<ScheduleView> {
     user.require(rbac::SCANS_CONFIGURE)?;
-    validate_schedule(&schedule).map_err(ApiError::BadRequest)?;
-    let value = serde_json::to_value(&schedule).map_err(anyhow::Error::from)?;
-    asi_db::schedule::save(&st.db, &value, user.0.id).await?;
-    st.scans.set_schedule(schedule);
+    validate_schedule(st, &b).await?;
+    let windows = serde_json::to_value(&b.windows).map_err(anyhow::Error::from)?;
+    let vuln = json!(b.vuln_check);
+    let input = ScheduleInput {
+        name: b.name.trim(),
+        enabled: b.enabled,
+        every_hours: b.every_hours,
+        windows: &windows,
+        target_ids: &b.target_ids,
+        vuln_check: vuln.as_str().unwrap_or("ask"),
+    };
+    let (id, action) = match id {
+        Some(id) => {
+            if !asi_db::schedule::update(&st.db, id, &input, user.0.id).await? {
+                return Err(ApiError::NotFound);
+            }
+            (id, "schedule.update")
+        }
+        None => (
+            asi_db::schedule::create(&st.db, &input, user.0.id).await?,
+            "schedule.create",
+        ),
+    };
+    let details = serde_json::to_value(&b).map_err(anyhow::Error::from)?;
+    audit_schedule(st, user, ip, action, id, details).await?;
+    asi_db::schedule::get(&st.db, id)
+        .await?
+        .ok_or(ApiError::NotFound)
+}
+
+async fn audit_schedule(
+    st: &AppState,
+    user: &AuthUser,
+    ip: &ClientIp,
+    action: &str,
+    id: Uuid,
+    details: serde_json::Value,
+) -> ApiResult<()> {
     let entry = Entry {
         user_id: Some(user.0.id),
         username: Some(&user.0.username),
-        action: "schedule.update",
+        action,
         entity: Some("scan_schedule"),
-        entity_id: None,
+        entity_id: Some(id.to_string()),
         ip: ip.0.map(|i| i.to_string()),
-        details: value,
+        details,
     };
-    audit::record(&st.db, entry).await?;
+    Ok(audit::record(&st.db, entry).await?)
+}
+
+pub async fn list_schedules(
+    State(st): State<AppState>,
+    user: AuthUser,
+) -> ApiResult<Json<Vec<ScheduleView>>> {
+    user.require(rbac::READ)?;
+    Ok(Json(asi_db::schedule::list(&st.db).await?))
+}
+
+pub async fn create_schedule(
+    State(st): State<AppState>,
+    user: AuthUser,
+    ip: ClientIp,
+    Json(b): Json<ScheduleBody>,
+) -> ApiResult<(StatusCode, Json<ScheduleView>)> {
+    let saved = save_schedule(&st, &user, &ip, None, b).await?;
+    Ok((StatusCode::CREATED, Json(saved)))
+}
+
+pub async fn update_schedule(
+    State(st): State<AppState>,
+    user: AuthUser,
+    ip: ClientIp,
+    Path(id): Path<Uuid>,
+    Json(b): Json<ScheduleBody>,
+) -> ApiResult<Json<ScheduleView>> {
+    Ok(Json(save_schedule(&st, &user, &ip, Some(id), b).await?))
+}
+
+pub async fn delete_schedule(
+    State(st): State<AppState>,
+    user: AuthUser,
+    ip: ClientIp,
+    Path(id): Path<Uuid>,
+) -> ApiResult<StatusCode> {
+    user.require(rbac::SCANS_CONFIGURE)?;
+    if !asi_db::schedule::delete(&st.db, id).await? {
+        return Err(ApiError::NotFound);
+    }
+    audit_schedule(&st, &user, &ip, "schedule.delete", id, json!({})).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -512,7 +642,7 @@ pub async fn post_run(
             .map_err(|e| ApiError::BadRequest(format!("Błędne body: {e}")))?;
         (b.target_ids, b.vuln_check)
     };
-    match start_run(&st, Some(user.0.id), selection.as_deref(), vuln_check).await {
+    match start_run(&st, Some(user.0.id), selection.as_deref(), vuln_check, None).await {
         Ok(id) => {
             let details =
                 json!({ "selected": selection.as_ref().map(Vec::len), "vuln_check": vuln_check });
@@ -577,6 +707,40 @@ pub async fn cancel_run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(name: &str, every_hours: i32, ago_hours: Option<i64>, enabled: bool) -> ScheduleView {
+        let now = OffsetDateTime::now_utc();
+        ScheduleView {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            enabled,
+            every_hours,
+            windows: json!([]),
+            target_ids: vec![Uuid::new_v4()],
+            vuln_check: "off".into(),
+            last_run_at: ago_hours.map(|h| now - time::Duration::hours(h)),
+            last_status: ago_hours.map(|_| "done".into()),
+            missing_targets: 0,
+        }
+    }
+
+    #[test]
+    fn due_schedules_per_entry_oldest_first() {
+        let now = OffsetDateTime::now_utc();
+        let all = [
+            entry("A", 1, Some(2), true),
+            entry("B", 24, Some(2), true),
+            entry("C", 1, Some(5), true),
+            entry("D", 1, None, false),
+        ];
+        let names: Vec<&str> = due_schedules(&all, now)
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert_eq!(names, ["C", "A"]);
+        let fresh = [entry("A", 1, Some(2), true), entry("N", 24, None, true)];
+        assert_eq!(due_schedules(&fresh, now)[0].name, "N");
+    }
 
     #[test]
     fn due_rules() {

@@ -380,6 +380,8 @@ mod tests {
             vuln_reason: None,
             vuln_summary: json!({}),
             dd_export: None,
+            schedule_id: None,
+            schedule_name: None,
         }
     }
 

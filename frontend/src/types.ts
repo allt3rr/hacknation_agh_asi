@@ -68,6 +68,9 @@ export interface Run {
   vuln_summary: Partial<Record<"services" | "identified" | "unidentified" | "vulnerabilities" | "confirmed", number>>;
   /** Ostatnia wysyłka do DefectDojo (automatyczna albo ręczna); null = jeszcze nie było. */
   dd_export: DefectDojoExport | null;
+  /** Pozycja harmonogramu, która uruchomiła przebieg; null = start ręczny. */
+  schedule_id: string | null;
+  schedule_name: string | null;
 }
 
 export interface DefectDojoExport {
@@ -192,6 +195,8 @@ export interface Dashboard {
   assets: Partial<Record<"active" | "unstable" | "inactive", number>>;
   latest_run: Run | null;
   scan_running: boolean;
+  /** Zakończone skany (`done`/`partial`) od początku, bez importów. */
+  scans_total: number;
   services: number;
   changes_total: number;
   technologies: { name: string; category: string; services: number }[];
@@ -200,7 +205,8 @@ export interface Dashboard {
 }
 
 export interface SignatureList {
-  builtin: { id: string; name: string; category: string }[];
+  /** `yaml` w formacie POST /signatures: edycja wbudowanej tworzy jej nadpisanie. */
+  builtin: { id: string; name: string; category: string; yaml: string }[];
   custom: { slug: string; version: number; yaml: string; enabled: boolean; created_at: string }[];
 }
 
@@ -220,11 +226,22 @@ export interface ScheduleWindow {
   days: string[];
 }
 
-/** Harmonogram automatycznych skanów (`GET/PUT /api/v1/schedule`). */
-export interface Schedule {
+/** Pozycja harmonogramu do zapisu (`POST /schedules`, `PUT /schedules/{id}`). */
+export interface ScheduleInput {
+  name: string;
   enabled: boolean;
   every_hours: number;
   windows: ScheduleWindow[];
+  target_ids: string[];
+  vuln_check: VulnMode;
+}
+
+/** Pozycja harmonogramu z `GET /schedules`: ostatni przebieg tej pozycji i liczba usuniętych celów. */
+export interface ScheduleEntry extends ScheduleInput {
+  id: string;
+  last_run_at: string | null;
+  last_status: RunStatus | null;
+  missing_targets: number;
 }
 
 export type FileFormat = "csv" | "json" | "text";

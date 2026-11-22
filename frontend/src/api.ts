@@ -1,7 +1,7 @@
 // Klient REST API v1. Sesję trzyma ciasteczko HttpOnly `asi_session`, które przeglądarka
 // wysyła sama (ten sam origin), więc JavaScript nie widzi ani nie przechowuje tokenu.
 
-import type { Change, Dashboard, DefectDojoResult, FileFormat, ImportSummary, Page, ResultRow, Role, Run, Schedule, Session, Severity, SignatureList, Target, TargetPatch, User, VulnMode, VulnPage } from "./types";
+import type { Change, Dashboard, DefectDojoResult, FileFormat, ImportSummary, Page, ResultRow, Role, Run, ScheduleEntry, ScheduleInput, Session, Severity, SignatureList, Target, TargetPatch, User, VulnMode, VulnPage } from "./types";
 
 const API_PREFIX = "/api/v1";
 
@@ -101,7 +101,7 @@ export const api = {
   },
 
   runs: {
-    list: () => request<Run[]>("GET", "/runs"),
+    list: (limit?: number) => request<Run[]>("GET", limit ? `/runs?limit=${limit}` : "/runs"),
     start: (targetIds: string[], vulnCheck: VulnMode) =>
       request<{ run_id: string }>("POST", "/runs", { json: { target_ids: targetIds, vuln_check: vulnCheck } }),
     cancel: (id: string) => request<void>("POST", `/runs/${id}/cancel`),
@@ -130,9 +130,11 @@ export const api = {
       }),
   },
 
-  schedule: {
-    get: () => request<Schedule>("GET", "/schedule"),
-    save: (schedule: Schedule) => request<void>("PUT", "/schedule", { json: schedule }),
+  schedules: {
+    list: () => request<ScheduleEntry[]>("GET", "/schedules"),
+    create: (entry: ScheduleInput) => request<ScheduleEntry>("POST", "/schedules", { json: entry }),
+    update: (id: string, entry: ScheduleInput) => request<ScheduleEntry>("PUT", `/schedules/${id}`, { json: entry }),
+    remove: (id: string) => request<void>("DELETE", `/schedules/${id}`),
   },
 
   overrides: {

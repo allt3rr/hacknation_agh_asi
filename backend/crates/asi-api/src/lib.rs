@@ -117,8 +117,12 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/admin/audit", get(manage::list_audit))
         .route(
-            "/schedule",
-            get(scans::get_schedule).put(scans::put_schedule),
+            "/schedules",
+            get(scans::list_schedules).post(scans::create_schedule),
+        )
+        .route(
+            "/schedules/{id}",
+            put(scans::update_schedule).delete(scans::delete_schedule),
         )
         .route("/runs", get(scans::list_runs).post(scans::post_run))
         .route("/runs/{id}", get(scans::get_run))

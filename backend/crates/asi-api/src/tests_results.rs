@@ -88,6 +88,15 @@ async fn paging_totals_and_dashboard(db: PgPool) {
     let st = state(&db).await;
     let editor = as_role(&st, &db, "ed", rbac::EDITOR).await;
     let viewer = as_role(&st, &db, "vi", rbac::VIEWER).await;
+    let empty = body(call(&st, "GET", "/api/v1/dashboard", Some(&viewer), None).await).await;
+    assert_eq!(empty["scans_total"], 0);
+    sqlx::query(
+        "INSERT INTO scan_runs (kind, status, finished_at) VALUES ('scan', 'done', now() - interval '1 day'),
+         ('scan', 'partial', now() - interval '1 day'), ('scan', 'failed', now() - interval '1 day')",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
     let items: Vec<Value> = (0..250)
         .map(|i| json!({ "ip": format!("10.0.{}.{}", i / 200, i % 200 + 1), "port": 22, "proto": "tcp" }))
         .collect();
@@ -134,6 +143,7 @@ async fn paging_totals_and_dashboard(db: PgPool) {
     assert_eq!(dash["changes_total"], 250, "licznik nie jest obcięty");
     assert_eq!(dash["services"], 250);
     assert_eq!(dash["latest_run"]["kind"], "import");
+    assert_eq!(dash["scans_total"], 2, "tylko done/partial, bez importów");
 }
 
 #[sqlx::test(migrator = "asi_db::MIGRATOR")]
@@ -490,6 +500,61 @@ async fn signatures_api_validates_and_respects_roles(db: PgPool) {
         .await
         .status(),
         StatusCode::NO_CONTENT
+    );
+}
+
+#[sqlx::test(migrator = "asi_db::MIGRATOR")]
+async fn builtin_signature_can_be_overridden_and_restored(db: PgPool) {
+    let st = state(&db).await;
+    let editor = as_role(&st, &db, "ed", rbac::EDITOR).await;
+    let viewer = as_role(&st, &db, "vi", rbac::VIEWER).await;
+    let list = body(call(&st, "GET", "/api/v1/signatures", Some(&viewer), None).await).await;
+    let builtin = list["builtin"].as_array().unwrap();
+    assert!(builtin
+        .iter()
+        .all(|s| !s["yaml"].as_str().unwrap().is_empty()));
+
+    let id = builtin[0]["id"].as_str().unwrap().to_string();
+    let confidence = |set: &asi_fingerprint::SignatureSet| {
+        set.signatures()
+            .iter()
+            .find(|s| s.id == id)
+            .unwrap()
+            .confidence
+    };
+    let original = confidence(&crate::scans::load_signatures(&st, &st.scans).await.unwrap());
+    let changed = if original == 1 { 2 } else { 1 };
+    let mut sigs =
+        asi_fingerprint::SignatureSet::parse_yaml(builtin[0]["yaml"].as_str().unwrap()).unwrap();
+    sigs[0].confidence = changed;
+    let yaml = serde_saphyr::to_string(&sigs).unwrap();
+
+    let res = call(
+        &st,
+        "POST",
+        "/api/v1/signatures",
+        Some(&editor),
+        Some(json!({ "yaml": yaml })),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        confidence(&crate::scans::load_signatures(&st, &st.scans).await.unwrap()),
+        changed
+    );
+
+    let res = call(
+        &st,
+        "DELETE",
+        &format!("/api/v1/signatures/{id}"),
+        Some(&editor),
+        None,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        confidence(&crate::scans::load_signatures(&st, &st.scans).await.unwrap()),
+        original
     );
 }
 

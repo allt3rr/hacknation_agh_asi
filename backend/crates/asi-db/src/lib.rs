@@ -129,7 +129,7 @@ mod tests {
             "rules",
             "scan_chunks",
             "scan_runs",
-            "scan_schedule",
+            "scan_schedules",
             "services",
             "sessions",
             "targets",

@@ -430,7 +430,11 @@ pub async fn list_signatures(State(st): State<AppState>, user: AuthUser) -> ApiR
     let builtin: Vec<Value> = SignatureSet::load_dir(&st.scans.signatures_dir)
         .unwrap_or_default()
         .into_iter()
-        .map(|s| json!({ "id": s.id, "name": s.name, "category": s.category }))
+        .map(|s| {
+            // ten sam format co przy POST, żeby edycja wbudowanej tworzyła jej nadpisanie
+            let yaml = serde_saphyr::to_string(&vec![&s]).unwrap_or_default();
+            json!({ "id": s.id, "name": s.name, "category": s.category, "yaml": yaml })
+        })
         .collect();
     Ok(Json(
         json!({ "builtin": builtin, "custom": rules::list(&st.db).await? }),

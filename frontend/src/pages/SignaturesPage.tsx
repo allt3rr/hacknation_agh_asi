@@ -19,6 +19,7 @@ const EXAMPLE_SIGNATURE = `- id: moja-aplikacja
       regex: 'Moja Aplikacja'`;
 
 type Custom = SignatureList["custom"][number];
+type Builtin = SignatureList["builtin"][number];
 
 export function SignaturesPage({ session }: { session: Session }) {
   const { data, error, reload } = useApiData(api.signatures.list);
@@ -26,6 +27,8 @@ export function SignaturesPage({ session }: { session: Session }) {
   const [yaml, setYaml] = useState(EXAMPLE_SIGNATURE);
   // slug edytowanej sygnatury (PUT = nowa wersja) albo null przy dodawaniu
   const [editing, setEditing] = useState<string | null>(null);
+  // id wbudowanej sygnatury, którą nadpisujemy (pierwsza wersja własnej = POST)
+  const [overriding, setOverriding] = useState<string | null>(null);
   const canWrite = editing ? can(session, "signatures.update") : can(session, "signatures.create");
   const editorHeading = useRef<HTMLHeadingElement>(null);
 
@@ -39,17 +42,33 @@ export function SignaturesPage({ session }: { session: Session }) {
         info(`Dodano: ${res.created.join(", ")}`);
       }
       setEditing(null);
+      setOverriding(null);
       await reload();
     });
 
-  const edit = (s: Custom) => {
-    setEditing(s.slug);
-    setYaml(s.yaml);
+  const showEditor = () =>
     // edytor jest nad listą: przenosimy tam fokus i widok
     requestAnimationFrame(() => {
       editorHeading.current?.scrollIntoView({ block: "start" });
       editorHeading.current?.focus();
     });
+
+  const edit = (s: Custom) => {
+    setEditing(s.slug);
+    setOverriding(null);
+    setYaml(s.yaml);
+    showEditor();
+  };
+
+  // aktywna własna sygnatura o id wbudowanej zastępuje ją w skanie
+  const overrides = new Map((data?.custom ?? []).filter((c) => c.enabled).map((c) => [c.slug, c]));
+  const editBuiltin = (b: Builtin) => {
+    const custom = overrides.get(b.id);
+    if (custom) return edit(custom);
+    setEditing(null);
+    setOverriding(b.id);
+    setYaml(b.yaml);
+    showEditor();
   };
 
   const disable = (s: Custom) =>
@@ -68,7 +87,10 @@ export function SignaturesPage({ session }: { session: Session }) {
       )}
 
       {(can(session, "signatures.create") || editing) && (
-        <Card title={editing ? `Edycja sygnatury ${editing}` : "Dodaj własną sygnaturę (YAML)"} headingRef={editorHeading}>
+        <Card
+          title={editing ? `Edycja sygnatury ${editing}` : overriding ? `Nadpisanie wbudowanej sygnatury ${overriding}` : "Dodaj własną sygnaturę (YAML)"}
+          headingRef={editorHeading}
+        >
           <label htmlFor="signature-yaml" className="mb-1 block">
             Definicja sygnatury (YAML)
           </label>
@@ -85,8 +107,8 @@ export function SignaturesPage({ session }: { session: Session }) {
             <button onClick={save} disabled={!canWrite}>
               Zapisz
             </button>
-            {editing && (
-              <button className={BTN_SECONDARY} onClick={() => { setEditing(null); setYaml(EXAMPLE_SIGNATURE); }}>
+            {(editing || overriding) && (
+              <button className={BTN_SECONDARY} onClick={() => { setEditing(null); setOverriding(null); setYaml(EXAMPLE_SIGNATURE); }}>
                 Anuluj edycję
               </button>
             )}
@@ -139,6 +161,16 @@ export function SignaturesPage({ session }: { session: Session }) {
             { header: "ID", mono: true, render: (s) => s.id },
             { header: "Nazwa", render: (s) => s.name },
             { header: "Kategoria", render: (s) => <span className={BADGE}>{s.category}</span> },
+            { header: "Stan", render: (s) => (overrides.has(s.id) ? <span className="text-orange">nadpisana</span> : "") },
+            {
+              header: "",
+              render: (s) =>
+                can(session, "signatures.create") && (
+                  <button className={BTN_SECONDARY} aria-label={`Edytuj wbudowaną sygnaturę ${s.id}`} onClick={() => editBuiltin(s)}>
+                    Edytuj
+                  </button>
+                ),
+            },
           ]}
         />
       </Card>

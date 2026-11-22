@@ -37,12 +37,17 @@ pub struct RunView {
     pub vuln_summary: Value,
     /// Ostatnia wysyłka do DefectDojo: `at`, `content`, `findings`, `engagements`, `failed`, `error`.
     pub dd_export: Option<Value>,
+    /// Pozycja harmonogramu, która uruchomiła przebieg (z profilu); `null` dla startu ręcznego.
+    pub schedule_id: Option<String>,
+    pub schedule_name: Option<String>,
 }
 
 pub(crate) const RUN_COLUMNS: &str =
     "id, kind, status, reason, coverage, started_at, finished_at, duration_ms,
                            hosts_total, hosts_done, triggered_by, created_at,
-                           vuln_state, vuln_reason, vuln_summary, dd_export";
+                           vuln_state, vuln_reason, vuln_summary, dd_export,
+                           profile_snapshot->>'schedule_id' AS schedule_id,
+                           profile_snapshot->>'schedule_name' AS schedule_name";
 
 /// Zapisuje wynik wysyłki do DefectDojo (czas `at` nadaje baza).
 pub async fn set_dd_export(db: &PgPool, run_id: Uuid, result: &Value) -> Result<()> {

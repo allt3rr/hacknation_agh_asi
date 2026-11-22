@@ -4,7 +4,7 @@ use crate::scans::ScanService;
 use crate::tests::{add_user, body, call, cookie_pair, login_as, prepared, PASSWORD};
 use crate::AppState;
 use asi_core::rbac;
-use asi_scanner::config::{ScanConfig, WindowConfig};
+use asi_scanner::config::ScanConfig;
 use asi_scanner::nmap::{AnyRunner, FakeRunner};
 use axum::http::StatusCode;
 use serde_json::{json, Value};
@@ -156,29 +156,57 @@ async fn second_start_conflicts_and_cancel_stops(db: PgPool) {
     );
 }
 
-#[sqlx::test(migrator = "asi_db::MIGRATOR")]
-async fn windows_and_bad_config_refuse_start(db: PgPool) {
-    let mut night = cfg();
-    night.schedule.windows = vec![WindowConfig {
-        start: "22:00".into(),
-        end: "06:00".into(),
-        days: vec![],
-    }];
-    let noon = PrimitiveDateTime::parse(
-        "2026-11-21 12:00",
+fn at(text: &str) -> PrimitiveDateTime {
+    PrimitiveDateTime::parse(
+        text,
         time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]"),
     )
-    .unwrap();
-    let svc = service(Ok(night), FakeRunner::default()).with_clock(Arc::new(move || Some(noon)));
+    .unwrap()
+}
+
+/// Tworzy pozycję harmonogramu przez API i zwraca ją z bazy.
+async fn add_schedule(
+    st: &AppState,
+    cookie: &str,
+    db: &PgPool,
+    windows: Value,
+) -> asi_db::schedule::ScheduleView {
+    let ids: Vec<String> = target_ids(db).await.into_iter().map(|t| t.0).collect();
+    let entry = json!({ "name": "noc", "every_hours": 1, "windows": windows, "target_ids": ids, "vuln_check": "off" });
+    let res = call(st, "POST", "/api/v1/schedules", Some(cookie), Some(entry)).await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let id: uuid::Uuid = body(res).await["id"].as_str().unwrap().parse().unwrap();
+    asi_db::schedule::get(db, id).await.unwrap().unwrap()
+}
+
+#[sqlx::test(migrator = "asi_db::MIGRATOR")]
+async fn windows_limit_schedule_not_manual_start(db: PgPool) {
+    let noon = at("2026-11-21 12:00");
+    let svc = service(Ok(cfg()), FakeRunner::default()).with_clock(Arc::new(move || Some(noon)));
     let (st, admin) = setup(&db, svc).await;
-    let (status, err) = start(&st, &admin).await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert!(err["error"].as_str().unwrap().contains("oknem"), "{err}");
-    let runs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM scan_runs")
-        .fetch_one(&db)
+    let night = add_schedule(
+        &st,
+        &admin,
+        &db,
+        json!([{ "start": "22:00", "end": "06:00", "days": [] }]),
+    )
+    .await;
+
+    // pozycja poza swoim oknem nie startuje
+    let err = crate::scans::start_run(&st, None, Some(&night.target_ids), None, Some(&night))
         .await
-        .unwrap();
-    assert_eq!(runs, 0);
+        .unwrap_err();
+    assert!(
+        matches!(&err, crate::scans::StartError::Refused(m) if m.contains("oknem")),
+        "{err:?}"
+    );
+    assert_eq!(crate::scans::run_due(&st).await.unwrap(), None);
+
+    // ręczny start o tej samej porze działa i nie ma terminu
+    let (status, started) = start(&st, &admin).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+    let run = wait_finished(&st, &admin, started["run_id"].as_str().unwrap()).await;
+    assert_eq!(run["status"], "done", "{run}");
 
     let bad = ScanConfig::from_toml(
         "[schedule]\n[[schedule.windows]]\nstart = \"25:00\"\nend = \"06:00\"\n",
@@ -198,12 +226,7 @@ async fn window_deadline_gives_partial_and_resume_goes_first(db: PgPool) {
     let mut c = cfg();
     c.chunk_size = 1;
     c.concurrency = 1;
-    c.schedule.windows = vec![WindowConfig {
-        start: "00:00".into(),
-        end: "23:59".into(),
-        days: vec![],
-    }];
-    // okno kończy się 300 ms po „teraz”
+    // okno pozycji kończy się 300 ms po „teraz”
     let svc = service(
         Ok(c.clone()),
         FakeRunner {
@@ -221,10 +244,21 @@ async fn window_deadline_gives_partial_and_resume_goes_first(db: PgPool) {
         .ok()
     }));
     let (st, admin) = setup(&db, svc).await;
-    let id = start(&st, &admin).await.1["run_id"]
-        .as_str()
+    let entry = add_schedule(
+        &st,
+        &admin,
+        &db,
+        json!([{ "start": "00:00", "end": "23:59", "days": [] }]),
+    )
+    .await;
+    let id = crate::scans::run_due(&st)
+        .await
         .unwrap()
+        .expect("należna pozycja startuje")
         .to_string();
+    let run = wait_finished(&st, &admin, &id).await;
+    assert_eq!(run["schedule_id"], json!(entry.id), "{run}");
+    assert_eq!(run["schedule_name"], "noc");
     let run = wait_finished(&st, &admin, &id).await;
     assert_eq!(run["status"], "partial", "{run}");
     assert_eq!(run["reason"], "koniec okna czasowego");
@@ -274,87 +308,122 @@ async fn window_deadline_gives_partial_and_resume_goes_first(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "asi_db::MIGRATOR")]
-async fn schedule_is_editable_validated_and_used_by_start(db: PgPool) {
-    let noon = PrimitiveDateTime::parse(
-        "2026-11-21 12:00",
-        time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]"),
-    )
-    .unwrap();
-    let svc = service(Ok(cfg()), FakeRunner::default()).with_clock(Arc::new(move || Some(noon)));
-    let (st, admin) = setup(&db, svc).await;
+async fn schedules_crud_validation_rbac_and_audit(db: PgPool) {
+    let (st, admin) = setup(&db, service(Ok(cfg()), FakeRunner::default())).await;
     add_user(&db, "viewer1", rbac::VIEWER).await;
+    add_user(&db, "editor1", rbac::EDITOR).await;
     let viewer = cookie_pair(&login_as(&st, "viewer1", PASSWORD).await);
+    let editor = cookie_pair(&login_as(&st, "editor1", PASSWORD).await);
+    let ids: Vec<String> = target_ids(&db).await.into_iter().map(|t| t.0).collect();
+    let entry = |every: i64, windows: Value, targets: &[String]| {
+        json!({ "name": "DMZ nocą", "enabled": true, "every_hours": every, "windows": windows,
+                "target_ids": targets, "vuln_check": "auto" })
+    };
+    let night = json!([{ "start": "22:00", "end": "06:00", "days": ["mon", "fri"] }]);
+    let post = |cookie: &str, b: Value| {
+        let (st, cookie) = (st.clone(), cookie.to_string());
+        async move { call(&st, "POST", "/api/v1/schedules", Some(&cookie), Some(b)).await }
+    };
 
-    let night = json!({ "enabled": true, "every_hours": 12,
-        "windows": [{ "start": "22:00", "end": "06:00", "days": ["mon", "fri"] }] });
-
-    // odczyt dla każdej roli, zapis tylko z scans.configure
-    let res = call(&st, "GET", "/api/v1/schedule", Some(&viewer), None).await;
+    // viewer czyta, ale nie zapisuje
+    let res = call(&st, "GET", "/api/v1/schedules", Some(&viewer), None).await;
     assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(body(res).await, json!([]));
+    let res = post(&viewer, entry(24, night.clone(), &ids[..2])).await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // walidacja: okno, częstotliwość, pusta i nieznana lista celów
+    for bad in [
+        entry(24, json!([{ "start": "25:00", "end": "06:00" }]), &ids[..2]),
+        entry(0, night.clone(), &ids[..2]),
+        entry(24, night.clone(), &[]),
+        entry(24, night.clone(), &[uuid::Uuid::new_v4().to_string()]),
+    ] {
+        let res = post(&editor, bad.clone()).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST, "{bad}");
+    }
+    let res = call(&st, "GET", "/api/v1/schedules", Some(&viewer), None).await;
+    assert_eq!(body(res).await, json!([]));
+
+    // utworzenie, edycja, usunięcie celu, usunięcie pozycji
+    let res = post(&editor, entry(24, night.clone(), &ids[..2])).await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let created = body(res).await;
+    let id = created["id"].as_str().unwrap().to_string();
+    assert_eq!(created["windows"], night);
+    assert_eq!(created["vuln_check"], "auto");
     let res = call(
         &st,
         "PUT",
-        "/api/v1/schedule",
+        &format!("/api/v1/schedules/{id}"),
+        Some(&editor),
+        Some(entry(12, night.clone(), &ids[..2])),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(body(res).await["every_hours"], 12);
+    let res = call(
+        &st,
+        "PUT",
+        &format!("/api/v1/schedules/{}", uuid::Uuid::new_v4()),
+        Some(&editor),
+        Some(entry(12, night.clone(), &ids[..2])),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let res = call(
+        &st,
+        "DELETE",
+        &format!("/api/v1/targets/{}", ids[0]),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert!(res.status().is_success(), "{}", res.status());
+    let list = body(call(&st, "GET", "/api/v1/schedules", Some(&viewer), None).await).await;
+    assert_eq!(list[0]["missing_targets"], 1);
+    let res = call(
+        &st,
+        "DELETE",
+        &format!("/api/v1/schedules/{id}"),
         Some(&viewer),
-        Some(night.clone()),
+        None,
     )
     .await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
-
-    // błędne okno i częstotliwość są odrzucane
-    let bad_window = json!({ "enabled": true, "every_hours": 12, "windows": [{ "start": "25:00", "end": "06:00" }] });
     let res = call(
         &st,
-        "PUT",
-        "/api/v1/schedule",
-        Some(&admin),
-        Some(bad_window),
-    )
-    .await;
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-    let bad_every = json!({ "enabled": true, "every_hours": 0, "windows": [] });
-    let res = call(
-        &st,
-        "PUT",
-        "/api/v1/schedule",
-        Some(&admin),
-        Some(bad_every),
-    )
-    .await;
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
-
-    // zapis: widoczny w odczycie, w bazie, w dzienniku audytu i od razu w polityce startu (południe poza oknem)
-    let res = call(
-        &st,
-        "PUT",
-        "/api/v1/schedule",
-        Some(&admin),
-        Some(night.clone()),
+        "DELETE",
+        &format!("/api/v1/schedules/{id}"),
+        Some(&editor),
+        None,
     )
     .await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
-    let saved = body(call(&st, "GET", "/api/v1/schedule", Some(&viewer), None).await).await;
-    assert_eq!(saved, night);
-    let stored: Value = sqlx::query_scalar("SELECT value FROM scan_schedule")
-        .fetch_one(&db)
-        .await
-        .unwrap();
-    assert_eq!(stored, night);
-    let audited: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'schedule.update'")
-            .fetch_one(&db)
-            .await
-            .unwrap();
-    assert_eq!(audited, 1);
-    let (status, err) = start(&st, &admin).await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert!(err["error"].as_str().unwrap().contains("oknem"), "{err}");
+    let res = call(
+        &st,
+        "DELETE",
+        &format!("/api/v1/schedules/{id}"),
+        Some(&editor),
+        None,
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 
-    // po restarcie (nowa usługa z plikiem bez okien) harmonogram wraca z bazy
-    let st2 = st.with_scans(service(Ok(cfg()), FakeRunner::default()));
-    assert!(st2.scans.schedule().windows.is_empty());
-    crate::scans::load_saved_schedule(&st2).await;
-    assert_eq!(serde_json::to_value(st2.scans.schedule()).unwrap(), night);
+    let audited: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM audit_log WHERE entity = 'scan_schedule' AND entity_id = $1 ORDER BY id",
+    )
+    .bind(&id)
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(
+        audited,
+        ["schedule.create", "schedule.update", "schedule.delete"]
+    );
+    // stary endpoint nie istnieje
+    let res = call(&st, "GET", "/api/v1/schedule", Some(&viewer), None).await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
 async fn target_ids(db: &PgPool) -> Vec<(String, String)> {
