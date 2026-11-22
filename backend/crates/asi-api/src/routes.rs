@@ -59,7 +59,11 @@ pub async fn login(
 
     let creds = asi_db::users::find_credentials(&st.db, &req.username).await?;
     let hash = creds.as_ref().map(|c| c.password_hash.clone());
-    let verified = st.login.verify(req.password.clone(), hash).await;
+    let verified = st
+        .login
+        .verify(req.password, hash)
+        .await
+        .ok_or(ApiError::TooManyRequests)?;
 
     let creds = match creds {
         Some(c) if verified && !c.disabled => c,

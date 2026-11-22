@@ -20,15 +20,12 @@ docker run -d --name asi-pg -e POSTGRES_USER=asi -e POSTGRES_PASSWORD=asi -e POS
   -p 127.0.0.1:5432:5432 postgres:16-alpine
 export DATABASE_URL=postgres://asi:asi@127.0.0.1:5432/asi
 export ASI_MASTER_KEY_FILE=$PWD/master.key   # 32 bajty base64, np. openssl rand -base64 32 > master.key
-cargo run -p asi -- serve            # migracje, seed ról, konto admin/admin, API na :8080
-
-curl -c cookies.txt -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"admin"}' http://127.0.0.1:8080/api/v1/auth/login
-curl -b cookies.txt http://127.0.0.1:8080/api/v1/me
+read -rs -p "Hasło administratora: " ASI_ADMIN_PASSWORD
+export ASI_ADMIN_PASSWORD
+cargo run -p asi -- serve
 ```
 
-Konto `admin`/`admin` powstaje przy pierwszym starcie na pustej bazie. To konto demo:
-nie wystawiaj backendu poza localhost i sieć labu.
+Na pustej bazie ustaw hasło startowe o długości co najmniej 10 znaków.
 
 Testy wymagają działającego PostgreSQL; `#[sqlx::test]` tworzy osobną bazę dla każdego testu:
 
@@ -66,7 +63,7 @@ DATABASE_URL=postgres://asi:asi@127.0.0.1:5432/asi cargo test
 | GET / POST | `/api/v1/admin/users` | `admin.users` | lista kont; `{username, password, role}` (hasło ≥ 10 znaków, 409 przy zajętej nazwie) |
 | PATCH / DELETE | `/api/v1/admin/users/{id}` | `admin.users` | `{role?, password?, disabled?}`; zmiana hasła i wyłączenie kończą sesje; 409 dla ostatniego aktywnego admina |
 | GET | `/api/v1/admin/audit?limit=&before=` | `admin.audit` | dziennik od najnowszych (limit ≤ 500, `before` = id) |
-| POST | `/api/v1/runs` | `scans.run` | start skanu → 202 `{run_id}`; 409: trwa skan, poza oknem, błędna konfiguracja, brak celów |
+| POST | `/api/v1/runs` | `scans.run` | start skanu, opcjonalne body `{target_ids: [uuid]}` (tylko te cele; wykluczone pomijane) → 202 `{run_id}`; 400: pusta lista, nieznany cel lub błędne body; 409: trwa skan, poza oknem, błędna konfiguracja, brak celów |
 | GET | `/api/v1/runs`, `/api/v1/runs/{id}` | `read` | status (`running`/`done`/`partial`/`failed`/`cancelled`), powód, pokrycie, czasy |
 | POST | `/api/v1/runs/{id}/cancel` | `scans.run` | przerywa trwający przebieg (wynik nie jest publikowany) |
 | GET | `/api/v1/runs/{id}/observations?limit=&offset=&ip=` | `read` | `{total, items}`: usługi z HTTP, TLS, technologiami i korektami; ciasteczka tylko nazwa + atrybuty |

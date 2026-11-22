@@ -7,12 +7,12 @@ use asi_core::rbac;
 use asi_scanner::config::{ScanConfig, WindowConfig};
 use asi_scanner::nmap::{AnyRunner, FakeRunner};
 use axum::http::StatusCode;
-use chrono::NaiveDateTime;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use time::PrimitiveDateTime;
 
 fn signatures_dir() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../signatures"))
@@ -33,7 +33,7 @@ fn service(cfg: Result<ScanConfig, String>, fake: FakeRunner) -> ScanService {
 
 async fn setup(db: &PgPool, svc: ScanService) -> (AppState, String) {
     let st = prepared(db).await.with_scans(svc);
-    let admin = cookie_pair(&login_as(&st, "admin", "admin").await);
+    let admin = cookie_pair(&login_as(&st, "admin", "fixture-password").await);
     let add = json!({ "text": "10.0.0.1 10.0.0.2 10.0.0.3" });
     assert_eq!(
         call(&st, "POST", "/api/v1/targets", Some(&admin), Some(add))
@@ -164,8 +164,12 @@ async fn windows_and_bad_config_refuse_start(db: PgPool) {
         end: "06:00".into(),
         days: vec![],
     }];
-    let noon = NaiveDateTime::parse_from_str("2026-11-21 12:00", "%Y-%m-%d %H:%M").unwrap();
-    let svc = service(Ok(night), FakeRunner::default()).with_clock(Arc::new(move || noon));
+    let noon = PrimitiveDateTime::parse(
+        "2026-11-21 12:00",
+        time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]"),
+    )
+    .unwrap();
+    let svc = service(Ok(night), FakeRunner::default()).with_clock(Arc::new(move || Some(noon)));
     let (st, admin) = setup(&db, svc).await;
     let (status, err) = start(&st, &admin).await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -208,7 +212,13 @@ async fn window_deadline_gives_partial_and_resume_goes_first(db: PgPool) {
         },
     )
     .with_clock(Arc::new(|| {
-        NaiveDateTime::parse_from_str("2026-11-21 23:58:59.700", "%Y-%m-%d %H:%M:%S%.3f").unwrap()
+        PrimitiveDateTime::parse(
+            "2026-11-21 23:58:59.700",
+            time::macros::format_description!(
+                "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond]"
+            ),
+        )
+        .ok()
     }));
     let (st, admin) = setup(&db, svc).await;
     let id = start(&st, &admin).await.1["run_id"]
@@ -265,8 +275,12 @@ async fn window_deadline_gives_partial_and_resume_goes_first(db: PgPool) {
 
 #[sqlx::test(migrator = "asi_db::MIGRATOR")]
 async fn schedule_is_editable_validated_and_used_by_start(db: PgPool) {
-    let noon = NaiveDateTime::parse_from_str("2026-11-21 12:00", "%Y-%m-%d %H:%M").unwrap();
-    let svc = service(Ok(cfg()), FakeRunner::default()).with_clock(Arc::new(move || noon));
+    let noon = PrimitiveDateTime::parse(
+        "2026-11-21 12:00",
+        time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]"),
+    )
+    .unwrap();
+    let svc = service(Ok(cfg()), FakeRunner::default()).with_clock(Arc::new(move || Some(noon)));
     let (st, admin) = setup(&db, svc).await;
     add_user(&db, "viewer1", rbac::VIEWER).await;
     let viewer = cookie_pair(&login_as(&st, "viewer1", PASSWORD).await);
@@ -277,28 +291,60 @@ async fn schedule_is_editable_validated_and_used_by_start(db: PgPool) {
     // odczyt dla każdej roli, zapis tylko z scans.configure
     let res = call(&st, "GET", "/api/v1/schedule", Some(&viewer), None).await;
     assert_eq!(res.status(), StatusCode::OK);
-    let res = call(&st, "PUT", "/api/v1/schedule", Some(&viewer), Some(night.clone())).await;
+    let res = call(
+        &st,
+        "PUT",
+        "/api/v1/schedule",
+        Some(&viewer),
+        Some(night.clone()),
+    )
+    .await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
     // błędne okno i częstotliwość są odrzucane
     let bad_window = json!({ "enabled": true, "every_hours": 12, "windows": [{ "start": "25:00", "end": "06:00" }] });
-    let res = call(&st, "PUT", "/api/v1/schedule", Some(&admin), Some(bad_window)).await;
+    let res = call(
+        &st,
+        "PUT",
+        "/api/v1/schedule",
+        Some(&admin),
+        Some(bad_window),
+    )
+    .await;
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     let bad_every = json!({ "enabled": true, "every_hours": 0, "windows": [] });
-    let res = call(&st, "PUT", "/api/v1/schedule", Some(&admin), Some(bad_every)).await;
+    let res = call(
+        &st,
+        "PUT",
+        "/api/v1/schedule",
+        Some(&admin),
+        Some(bad_every),
+    )
+    .await;
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
     // zapis: widoczny w odczycie, w bazie, w dzienniku audytu i od razu w polityce startu (południe poza oknem)
-    let res = call(&st, "PUT", "/api/v1/schedule", Some(&admin), Some(night.clone())).await;
+    let res = call(
+        &st,
+        "PUT",
+        "/api/v1/schedule",
+        Some(&admin),
+        Some(night.clone()),
+    )
+    .await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
     let saved = body(call(&st, "GET", "/api/v1/schedule", Some(&viewer), None).await).await;
     assert_eq!(saved, night);
-    let stored: Value = sqlx::query_scalar("SELECT value FROM scan_schedule").fetch_one(&db).await.unwrap();
-    assert_eq!(stored, night);
-    let audited: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'schedule.update'")
+    let stored: Value = sqlx::query_scalar("SELECT value FROM scan_schedule")
         .fetch_one(&db)
         .await
         .unwrap();
+    assert_eq!(stored, night);
+    let audited: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'schedule.update'")
+            .fetch_one(&db)
+            .await
+            .unwrap();
     assert_eq!(audited, 1);
     let (status, err) = start(&st, &admin).await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -309,4 +355,131 @@ async fn schedule_is_editable_validated_and_used_by_start(db: PgPool) {
     assert!(st2.scans.schedule().windows.is_empty());
     crate::scans::load_saved_schedule(&st2).await;
     assert_eq!(serde_json::to_value(st2.scans.schedule()).unwrap(), night);
+}
+
+async fn target_ids(db: &PgPool) -> Vec<(String, String)> {
+    sqlx::query_as("SELECT id::text, value FROM targets ORDER BY value")
+        .fetch_all(db)
+        .await
+        .unwrap()
+}
+
+async fn start_with(st: &AppState, cookie: &str, ids: Value) -> (StatusCode, Value) {
+    let res = call(
+        st,
+        "POST",
+        "/api/v1/runs",
+        Some(cookie),
+        Some(json!({ "target_ids": ids })),
+    )
+    .await;
+    (res.status(), body(res).await)
+}
+
+#[sqlx::test(migrator = "asi_db::MIGRATOR")]
+async fn selected_targets_only_and_others_keep_state(db: PgPool) {
+    let fake = FakeRunner {
+        open_port: 22,
+        ..Default::default()
+    };
+    let (st, admin) = setup(&db, service(Ok(cfg()), fake)).await;
+    let ids = target_ids(&db).await; // 10.0.0.1, 10.0.0.2, 10.0.0.3
+
+    let (status, started) = start_with(&st, &admin, json!([ids[0].0, ids[1].0])).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+    let id = started["run_id"].as_str().unwrap().to_string();
+    let run = wait_finished(&st, &admin, &id).await;
+    assert_eq!(run["status"], "done");
+    assert_eq!(run["coverage"]["scanned"], 2);
+    let ips: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT host(ip) FROM observations WHERE run_id = $1::uuid ORDER BY 1",
+    )
+    .bind(&id)
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(ips, ["10.0.0.1", "10.0.0.2"]);
+    let selected: Option<i64> = sqlx::query_scalar(
+        "SELECT (details->>'selected')::bigint FROM audit_log WHERE action = 'run.start' ORDER BY id DESC LIMIT 1",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(selected, Some(2));
+
+    // pełny przebieg (bez body), potem tylko 10.0.0.1: 10.0.0.3 nie dostaje zmian
+    let full = start(&st, &admin).await.1["run_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    wait_finished(&st, &admin, &full).await;
+    let only = start_with(&st, &admin, json!([ids[0].0])).await.1["run_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        wait_finished(&st, &admin, &only).await["coverage"]["scanned"],
+        1
+    );
+    let changes = body(
+        call(
+            &st,
+            "GET",
+            &format!("/api/v1/runs/{only}/changes"),
+            Some(&admin),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert!(
+        changes["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["ip"] != "10.0.0.3"),
+        "{changes}"
+    );
+}
+
+#[sqlx::test(migrator = "asi_db::MIGRATOR")]
+async fn selection_is_validated(db: PgPool) {
+    let (st, admin) = setup(&db, service(Ok(cfg()), FakeRunner::default())).await;
+    let ids = target_ids(&db).await;
+    add_user(&db, "vi", rbac::VIEWER).await;
+    let viewer = cookie_pair(&login_as(&st, "vi", PASSWORD).await);
+
+    assert_eq!(
+        start_with(&st, &viewer, json!([ids[0].0])).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        start_with(&st, &admin, json!([])).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        start_with(&st, &admin, json!(["00000000-0000-0000-0000-000000000000"]))
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        start_with(&st, &admin, json!(["nie-uuid"])).await.0,
+        StatusCode::BAD_REQUEST
+    );
+
+    sqlx::query("UPDATE targets SET excluded = true WHERE id = $1::uuid")
+        .bind(&ids[2].0)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert_eq!(
+        start_with(&st, &admin, json!([ids[2].0])).await.0,
+        StatusCode::CONFLICT
+    );
+    let runs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM scan_runs")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(runs, 0, "odrzucony start nie tworzy przebiegu");
 }

@@ -158,7 +158,7 @@ async fn import_organizer_file_dry_run_and_reimport(db: PgPool) {
 #[sqlx::test(migrator = "asi_db::MIGRATOR")]
 async fn user_admin_flow_and_audit(db: PgPool) {
     let st = prepared(&db).await;
-    let admin = cookie_pair(&login_as(&st, "admin", "admin").await);
+    let admin = cookie_pair(&login_as(&st, "admin", "fixture-password").await);
     let editor = logged(&st, &db, "edek", rbac::EDITOR).await;
     let users = "/api/v1/admin/users";
 
@@ -252,4 +252,28 @@ async fn user_admin_flow_and_audit(db: PgPool) {
     let analyst = logged(&st, &db, "an", rbac::ANALYST).await;
     let res = call(&st, "GET", "/api/v1/admin/audit", Some(&analyst), None).await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[sqlx::test(migrator = "asi_db::MIGRATOR")]
+async fn audit_failure_rolls_back_user_creation(db: PgPool) {
+    let st = prepared(&db).await;
+    let admin = cookie_pair(&login_as(&st, "admin", "fixture-password").await);
+    sqlx::query("ALTER TABLE audit_log ADD CHECK (action <> 'user.create')")
+        .execute(&db)
+        .await
+        .unwrap();
+    let input = json!({"username":"rollback", "password":"fixture-password", "role":"viewer"});
+    let res = call(
+        &st,
+        "POST",
+        "/api/v1/admin/users",
+        Some(&admin),
+        Some(input),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(asi_db::users::find_credentials(&db, "rollback")
+        .await
+        .unwrap()
+        .is_none());
 }

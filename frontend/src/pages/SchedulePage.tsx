@@ -61,7 +61,7 @@ export function SchedulePage({ session }: { session: Session }) {
 
   return (
     <form onSubmit={save}>
-      {!editable && <p className="mb-4 text-muted">Tylko odczyt: Twoja rola nie może zmieniać harmonogramu.</p>}
+      {!editable && <p className="mb-2 text-muted">tylko odczyt (brak scans.configure)</p>}
 
       <fieldset disabled={!editable} className="contents">
         <Card title="Automatyczne skany">
@@ -83,19 +83,20 @@ export function SchedulePage({ session }: { session: Session }) {
               onChange={(e) => update({ every_hours: Number(e.target.value) })}
             />
             <span>godz.</span>
-            <span id="every-hours-hint" className="text-muted">
-              Odstęp od startu poprzedniego skanu, od 1 do 720 godz. Po skanie częściowym lub zakończonym błędem kolejny startuje bez czekania na ten odstęp.
+            <span id="every-hours-hint" className="text-xs text-muted" title="Po skanie częściowym lub błędnym kolejny startuje bez czekania.">
+              od startu poprzedniego, 1–720
             </span>
           </div>
         </Card>
 
         <Card title="Okna czasowe uruchomienia">
-          <p className="mb-3 text-muted">
-            Skany, także uruchamiane ręcznie, startują tylko w oknie. Skan, który nie skończy się do końca okna, zostaje zatrzymany, a niezeskanowane
-            adresy idą na początek kolejnego okna. Okno może przechodzić przez północ, np. 22:00–06:00. Bez okien skan może ruszyć o każdej porze.
-            Godziny są w UTC (czas polski: zimą UTC+1, latem UTC+2).
+          <p
+            className="mb-2 text-xs text-muted"
+            title="Dotyczy też startu ręcznego. Skan niedokończony w oknie jest zatrzymywany, reszta adresów idzie na początek kolejnego okna. Okno może przechodzić przez północ (22:00–06:00)."
+          >
+            UTC (PL: zimą +1, latem +2) · start tylko w oknie · reszta przechodzi do następnego okna
           </p>
-          {draft.windows.length === 0 && <p className="mb-3 text-muted">Brak okien: skan może ruszyć o każdej porze.</p>}
+          {draft.windows.length === 0 && <p className="mb-2 text-muted">brak okien: start o dowolnej porze</p>}
           {draft.windows.map((window, index) => (
             <fieldset key={index} className="my-2 flex flex-wrap items-center gap-2 rounded-xl border border-line p-3">
               <legend className="px-1 text-muted">Okno {index + 1}</legend>
@@ -134,8 +135,8 @@ export function SchedulePage({ session }: { session: Session }) {
           </div>
         )}
       </fieldset>
-      <p className="mt-4 text-muted">
-        Limit pakietów/s, listę portów i liczbę równoległych procesów nmap ustawia się w pliku <code>backend/config/scan.toml</code>.
+      <p className="mt-3 text-xs text-muted">
+        pps, porty, równoległość nmap: <code>backend/config/scan.toml</code>
       </p>
     </form>
   );

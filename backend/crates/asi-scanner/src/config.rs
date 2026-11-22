@@ -1,9 +1,9 @@
 //! Konfiguracja skanu (TOML, `ASI_SCAN_CONFIG`). Wartości domyślne są celowo ostrożne.
 
 use anyhow::{anyhow, bail, Context, Result};
-use chrono::{Datelike, Duration as ChronoDuration, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use time::{Date, Duration as WindowDuration, PrimitiveDateTime, Time, Weekday};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -144,12 +144,12 @@ pub enum WindowDecision {
     /// Brak okien: dowolna pora, bez terminu.
     Unrestricted,
     /// W oknie: termin = koniec okna.
-    Until(NaiveDateTime),
+    Until(PrimitiveDateTime),
     /// Poza wszystkimi oknami.
     Closed,
 }
 
-pub fn window_decision(windows: &[Window], now: NaiveDateTime) -> WindowDecision {
+pub fn window_decision(windows: &[Window], now: PrimitiveDateTime) -> WindowDecision {
     if windows.is_empty() {
         return WindowDecision::Unrestricted;
     }
@@ -161,15 +161,27 @@ pub fn window_decision(windows: &[Window], now: NaiveDateTime) -> WindowDecision
 
 #[derive(Debug, Clone)]
 pub struct Window {
-    start: NaiveTime,
-    end: NaiveTime,
+    start: Time,
+    end: Time,
     days: Vec<Weekday>,
+}
+
+fn parse_weekday(value: &str) -> Option<Weekday> {
+    use Weekday::*;
+    [
+        Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday,
+    ]
+    .into_iter()
+    .find(|day| {
+        let full = day.to_string();
+        value.eq_ignore_ascii_case(&full) || value.eq_ignore_ascii_case(&full[..3])
+    })
 }
 
 impl Window {
     pub fn parse(config: &WindowConfig) -> Result<Self> {
         let time = |s: &str| {
-            NaiveTime::parse_from_str(s, "%H:%M")
+            Time::parse(s, time::macros::format_description!("[hour]:[minute]"))
                 .map_err(|_| anyhow!("niepoprawna godzina {s:?} (HH:MM)"))
         };
         let start = time(&config.start)?;
@@ -180,36 +192,34 @@ impl Window {
         let days = config
             .days
             .iter()
-            .map(|d| {
-                d.parse::<Weekday>()
-                    .map_err(|_| anyhow!("nieznany dzień tygodnia {d:?}"))
-            })
+            .map(|d| parse_weekday(d).ok_or_else(|| anyhow!("nieznany dzień tygodnia {d:?}")))
             .collect::<Result<Vec<_>>>()?;
         Ok(Self { start, end, days })
     }
 
     /// Koniec okna, jeśli `now` mieści się w oknie. Okno może przechodzić przez północ
     /// (np. 22:00–06:00); dzień tygodnia liczy się dla dnia, w którym okno się zaczęło.
-    pub fn end_if_active(&self, now: NaiveDateTime) -> Option<NaiveDateTime> {
+    pub fn end_if_active(&self, now: PrimitiveDateTime) -> Option<PrimitiveDateTime> {
         let time = now.time();
         let today = now.date();
-        let yesterday = today - ChronoDuration::days(1);
-        let tomorrow = today + ChronoDuration::days(1);
+        let yesterday = today - WindowDuration::days(1);
+        let tomorrow = today + WindowDuration::days(1);
 
         if self.start < self.end {
             let inside = time >= self.start && time < self.end;
-            return (inside && self.allows_day(today)).then(|| today.and_time(self.end));
+            return (inside && self.allows_day(today)).then(|| today.with_time(self.end));
         }
         if time >= self.start {
-            self.allows_day(today).then(|| tomorrow.and_time(self.end))
+            self.allows_day(today).then(|| tomorrow.with_time(self.end))
         } else if time < self.end {
-            self.allows_day(yesterday).then(|| today.and_time(self.end))
+            self.allows_day(yesterday)
+                .then(|| today.with_time(self.end))
         } else {
             None
         }
     }
 
-    fn allows_day(&self, day: NaiveDate) -> bool {
+    fn allows_day(&self, day: Date) -> bool {
         self.days.is_empty() || self.days.contains(&day.weekday())
     }
 }
@@ -218,8 +228,12 @@ impl Window {
 mod tests {
     use super::*;
 
-    fn at(value: &str) -> NaiveDateTime {
-        NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M").unwrap()
+    fn at(value: &str) -> PrimitiveDateTime {
+        PrimitiveDateTime::parse(
+            value,
+            time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]"),
+        )
+        .unwrap()
     }
 
     fn window(start: &str, end: &str, days: &[&str]) -> Window {

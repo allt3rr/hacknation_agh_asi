@@ -6,9 +6,11 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 pub async fn load(db: &PgPool) -> Result<Option<Value>> {
-    Ok(sqlx::query_scalar("SELECT value FROM scan_schedule WHERE id")
-        .fetch_optional(db)
-        .await?)
+    Ok(
+        sqlx::query_scalar("SELECT value FROM scan_schedule WHERE id")
+            .fetch_optional(db)
+            .await?,
+    )
 }
 
 pub async fn save(db: &PgPool, value: &Value, user: Uuid) -> Result<()> {

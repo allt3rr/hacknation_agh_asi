@@ -91,7 +91,7 @@ impl HttpView {
 }
 
 /// Wynik dla API i eksportu: wartości po korektach, surowy pomiar w `raw_*`, bez wartości ciasteczek.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ResultRow {
     pub id: String,
@@ -114,7 +114,36 @@ pub struct ResultRow {
     pub raw_service: Option<String>,
     pub raw_product: Option<String>,
     pub raw_version: Option<String>,
-    pub seen_at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub seen_at: time::OffsetDateTime,
+}
+
+impl Default for ResultRow {
+    fn default() -> Self {
+        Self {
+            id: Default::default(),
+            run_id: Default::default(),
+            key: Default::default(),
+            ip: Default::default(),
+            hostname: Default::default(),
+            port: Default::default(),
+            proto: Default::default(),
+            state: Default::default(),
+            service: Default::default(),
+            product: Default::default(),
+            version: Default::default(),
+            http: Default::default(),
+            technologies: Default::default(),
+            status: Default::default(),
+            severity: Default::default(),
+            owner: Default::default(),
+            note: Default::default(),
+            raw_service: Default::default(),
+            raw_product: Default::default(),
+            raw_version: Default::default(),
+            seen_at: time::OffsetDateTime::UNIX_EPOCH,
+        }
+    }
 }
 
 impl ResultRow {

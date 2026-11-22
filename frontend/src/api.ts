@@ -118,7 +118,7 @@ export const api = {
 
   runs: {
     list: () => request<Run[]>("GET", "/runs"),
-    start: () => request<{ run_id: string }>("POST", "/runs"),
+    start: (targetIds: string[]) => request<{ run_id: string }>("POST", "/runs", { json: { target_ids: targetIds } }),
     cancel: (id: string) => request<void>("POST", `/runs/${id}/cancel`),
     changes: (id: string, offset = 0) => request<Page<Change>>("GET", `/runs/${id}/changes?limit=200&offset=${offset}`),
     observations: (id: string, offset = 0) =>

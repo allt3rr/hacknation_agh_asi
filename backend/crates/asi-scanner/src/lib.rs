@@ -135,12 +135,15 @@ pub struct Scanner<R: ChunkRunner> {
     runner: Arc<R>,
     http: Arc<HttpProber>,
     signatures: Arc<SignatureSet>,
+    progress: Arc<AtomicUsize>,
 }
 
 struct Shared {
     queue: Mutex<VecDeque<String>>,
     chunk_size: AtomicUsize,
     report: Mutex<ScanReport>,
+    /// Licznik celów z zakończonych podgrup; tylko w pierwszej fazie nmap (ponowny pomiar go nie zwiększa).
+    progress: Option<Arc<AtomicUsize>>,
 }
 
 impl<R: ChunkRunner> Scanner<R> {
@@ -151,11 +154,19 @@ impl<R: ChunkRunner> Scanner<R> {
             runner,
             http: Arc::new(http),
             signatures: Arc::new(signatures),
+            progress: Arc::new(AtomicUsize::new(0)),
         })
     }
 
+    /// Ile celów z `plan.queue` ma już zakończoną podgrupę (udaną, nieudaną albo odłożoną).
+    pub fn progress(&self) -> Arc<AtomicUsize> {
+        self.progress.clone()
+    }
+
     pub async fn run(&self, plan: Plan, limits: Limits) -> ScanReport {
-        let mut report = self.nmap_phase(plan.queue.clone(), &limits).await;
+        let mut report = self
+            .nmap_phase(plan.queue.clone(), &limits, Some(self.progress.clone()))
+            .await;
         report.planned = plan.queue.len();
 
         if self.cfg.recheck_missing && !limits.expired() {
@@ -170,7 +181,7 @@ impl<R: ChunkRunner> Scanner<R> {
                     count = missing.len(),
                     "ponowny pomiar hostów bez odpowiedzi"
                 );
-                let mut second = self.nmap_phase(missing, &limits).await;
+                let mut second = self.nmap_phase(missing, &limits, None).await;
                 // ponowny pomiar nie dodaje zaległości: cel został już zeskanowany raz
                 second.pending.clear();
                 second.failed.clear();
@@ -208,7 +219,12 @@ impl<R: ChunkRunner> Scanner<R> {
         report
     }
 
-    async fn nmap_phase(&self, queue: Vec<String>, limits: &Limits) -> ScanReport {
+    async fn nmap_phase(
+        &self,
+        queue: Vec<String>,
+        limits: &Limits,
+        progress: Option<Arc<AtomicUsize>>,
+    ) -> ScanReport {
         let initial = self
             .cfg
             .chunk_size
@@ -217,6 +233,7 @@ impl<R: ChunkRunner> Scanner<R> {
             queue: Mutex::new(queue.into()),
             chunk_size: AtomicUsize::new(initial),
             report: Mutex::new(ScanReport::default()),
+            progress,
         });
         let mut workers = JoinSet::new();
         for _ in 0..self.cfg.concurrency.max(1) {
@@ -329,12 +346,20 @@ async fn nmap_worker<R: ChunkRunner>(
         };
         let Some(result) = result else {
             // termin lub anulowanie w trakcie: proces nmap zabity, podgrupa wraca do zaległych
+            add_progress(&shared, chunk.len());
             shared.report.lock().unwrap().pending.extend(chunk);
             break;
         };
         let secs = started.elapsed().as_secs_f64();
         record(&shared, &chunk, result, secs);
+        add_progress(&shared, chunk.len());
         adjust_chunk_size(&shared, &cfg, chunk.len(), secs);
+    }
+}
+
+fn add_progress(shared: &Shared, n: usize) {
+    if let Some(p) = &shared.progress {
+        p.fetch_add(n, Ordering::Relaxed);
     }
 }
 
@@ -462,6 +487,16 @@ mod tests {
         assert!(r.scanned.is_empty());
         assert_eq!(r.failed.iter().map(|f| f.targets.len()).sum::<usize>(), 6);
         assert_eq!(r.status(false, false).0, RunStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn progress_counts_every_finished_chunk() {
+        for fail in [false, true] {
+            let s = scanner(fail, Duration::ZERO);
+            let progress = s.progress();
+            s.run(plan(7), no_limits()).await;
+            assert_eq!(progress.load(Ordering::Relaxed), 7, "fail={fail}");
+        }
     }
 
     #[tokio::test]

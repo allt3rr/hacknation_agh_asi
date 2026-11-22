@@ -1,6 +1,6 @@
 //! Wspólne typy danych: cele, obserwacje usług, wyniki HTTP i detekcje.
 
-use chrono::{DateTime, Utc};
+use time::OffsetDateTime;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -67,8 +67,9 @@ pub struct Observation {
     pub http: Option<HttpInfo>,
     #[serde(default)]
     pub detections: Vec<Detection>,
-    #[serde(default = "Utc::now")]
-    pub seen_at: DateTime<Utc>,
+    #[serde(default = "OffsetDateTime::now_utc")]
+    #[serde(with = "time::serde::rfc3339")]
+    pub seen_at: OffsetDateTime,
 }
 
 fn default_proto() -> String {
@@ -94,7 +95,7 @@ impl Observation {
             tunnel: None,
             http: None,
             detections: Vec::new(),
-            seen_at: Utc::now(),
+            seen_at: OffsetDateTime::now_utc(),
         }
     }
 

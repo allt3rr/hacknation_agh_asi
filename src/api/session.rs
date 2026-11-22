@@ -7,7 +7,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::CookieJar;
-use chrono::{Duration, Utc};
+use time::{Duration, OffsetDateTime};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -38,7 +38,7 @@ async fn login(
     let role = Role::parse(&user.role)
         .ok_or_else(|| anyhow::anyhow!("nieznana rola w bazie: {}", user.role))?;
     let hours = st.cfg.server.session_hours;
-    let expires_at = (Utc::now() + Duration::hours(hours)).timestamp();
+    let expires_at = (OffsetDateTime::now_utc() + Duration::hours(hours)).unix_timestamp();
 
     db::delete_expired_sessions(&st.db).await?;
     let token = auth::new_token();

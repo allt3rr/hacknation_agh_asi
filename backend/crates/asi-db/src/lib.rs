@@ -34,13 +34,13 @@ pub async fn connect(url: &str) -> Result<PgPool> {
 }
 
 /// Migracje, seed ról i konto admina. Bezpieczne do wielokrotnego wywołania.
-pub async fn prepare(db: &PgPool) -> Result<()> {
+pub async fn prepare(db: &PgPool, password: Option<&str>) -> Result<()> {
     MIGRATOR
         .run(db)
         .await
         .context("Migracje bazy nie powiodły się")?;
     seed_roles(db).await?;
-    users::bootstrap_admin(db).await?;
+    users::bootstrap_admin(db, password).await?;
     Ok(())
 }
 

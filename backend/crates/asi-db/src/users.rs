@@ -5,9 +5,6 @@ use asi_core::{password, rbac};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Hasło konta demo. shortcut: stałe hasło `admin`/`admin` na demo i lab; konfigurowalne hasło i wymuszona zmiana w kolejnym etapie.
-pub const DEMO_ADMIN_PASSWORD: &str = "admin";
-
 /// Dane potrzebne do weryfikacji hasła przy logowaniu.
 #[derive(Debug, sqlx::FromRow)]
 pub struct Credentials {
@@ -31,7 +28,8 @@ pub struct UserSummary {
     pub username: String,
     pub disabled: bool,
     pub roles: Vec<String>,
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: time::OffsetDateTime,
 }
 
 /// Zmiana konta. `password_hash` i `disabled = Some(true)` zwiększają wersję poświadczeń.
@@ -94,7 +92,11 @@ async fn is_active_admin(tx: &mut sqlx::PgConnection, user_id: Uuid) -> Result<b
     .await?)
 }
 
-pub async fn update_user(db: &PgPool, user_id: Uuid, update: &UserUpdate) -> Result<Outcome> {
+pub async fn update_user<'c>(
+    db: impl sqlx::Acquire<'c, Database = sqlx::Postgres>,
+    user_id: Uuid,
+    update: &UserUpdate,
+) -> Result<Outcome> {
     let mut tx = db.begin().await?;
     let exists: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)")
         .bind(user_id)
@@ -149,7 +151,10 @@ pub async fn update_user(db: &PgPool, user_id: Uuid, update: &UserUpdate) -> Res
     Ok(Outcome::Done)
 }
 
-pub async fn delete_user(db: &PgPool, user_id: Uuid) -> Result<Outcome> {
+pub async fn delete_user<'c>(
+    db: impl sqlx::Acquire<'c, Database = sqlx::Postgres>,
+    user_id: Uuid,
+) -> Result<Outcome> {
     let mut tx = db.begin().await?;
     if is_active_admin(&mut tx, user_id).await? && !keeps_an_admin(&mut tx, user_id).await? {
         return Ok(Outcome::LastAdmin);
@@ -174,8 +179,8 @@ pub fn is_unique_violation(error: &anyhow::Error) -> bool {
         .is_some_and(|e| e.is_unique_violation())
 }
 
-pub async fn create_user(
-    db: &PgPool,
+pub async fn create_user<'c>(
+    db: impl sqlx::Acquire<'c, Database = sqlx::Postgres>,
     username: &str,
     password_hash: &str,
     role: &str,
@@ -248,17 +253,28 @@ pub async fn bump_credential_version(db: &PgPool, user_id: Uuid) -> Result<()> {
     Ok(())
 }
 
-/// Przy pustej tabeli `users` tworzy konto demo `admin`/`admin` z rolą `admin`.
-pub async fn bootstrap_admin(db: &PgPool) -> Result<()> {
+/// Przy pustej tabeli `users` tworzy konto administratora z rolą `admin`.
+pub async fn bootstrap_admin(db: &PgPool, password: Option<&str>) -> Result<()> {
+    let mut tx = db.begin().await?;
+    sqlx::query("LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE")
+        .execute(&mut *tx)
+        .await?;
     let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-        .fetch_one(db)
+        .fetch_one(&mut *tx)
         .await?;
     if users > 0 {
+        tx.commit().await?;
         return Ok(());
     }
-    let hash = password::hash_password(DEMO_ADMIN_PASSWORD)?;
-    create_user(db, "admin", &hash, rbac::ADMIN).await?;
-    tracing::warn!("Utworzono konto demo 'admin' z domyślnym hasłem. Nie wystawiaj backendu poza localhost/lab.");
+    let password = password
+        .filter(|p| p.chars().count() >= 10)
+        .ok_or_else(|| {
+            anyhow::anyhow!("Pierwszy start wymaga ASI_ADMIN_PASSWORD (minimum 10 znaków)")
+        })?;
+    let hash = password::hash_password(password)?;
+    create_user(&mut *tx, "admin", &hash, rbac::ADMIN).await?;
+    tx.commit().await?;
+    tracing::info!("Utworzono konto administratora");
     Ok(())
 }
 
@@ -270,16 +286,23 @@ mod tests {
     #[sqlx::test(migrator = "MIGRATOR")]
     async fn bootstrap_creates_demo_admin_once(db: PgPool) {
         seed_roles(&db).await.unwrap();
-        bootstrap_admin(&db).await.unwrap();
+        assert!(bootstrap_admin(&db, None).await.is_err());
+        assert!(bootstrap_admin(&db, Some("admin")).await.is_err());
+        bootstrap_admin(&db, Some("fixture-password"))
+            .await
+            .unwrap();
         let creds = find_credentials(&db, "admin").await.unwrap().unwrap();
         assert!(creds.password_hash.starts_with("$argon2id$"));
-        assert!(password::verify_password("admin", &creds.password_hash));
+        assert!(password::verify_password(
+            "fixture-password",
+            &creds.password_hash
+        ));
 
         let profile = profile(&db, creds.id).await.unwrap().unwrap();
         assert_eq!(profile.roles, vec!["admin"]);
         assert!(profile.permissions.contains(&"admin.users".to_string()));
 
-        bootstrap_admin(&db).await.unwrap();
+        bootstrap_admin(&db, None).await.unwrap();
         let again = find_credentials(&db, "admin").await.unwrap().unwrap();
         assert_eq!(again.password_hash, creds.password_hash);
         let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")

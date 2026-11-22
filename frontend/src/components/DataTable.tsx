@@ -5,6 +5,23 @@ export interface Column<T> {
   /** Pusty nagłówek oznacza kolumnę z przyciskami akcji (czytnik ekranu dostaje "Akcje"). */
   header: string;
   render: (row: T) => ReactNode;
+  /** Wartość techniczna (IP, port, hash): czcionka monospace. */
+  mono?: boolean;
+  /** Bez ucinania: pola edytowalne i dłuższe treści, które mają się zawijać. */
+  wrap?: boolean;
+  /** Pełna wartość w podpowiedzi, gdy `render` nie zwraca zwykłego tekstu. */
+  title?: (row: T) => string;
+}
+
+// Długie wartości ucinamy wielokropkiem; pełna treść zostaje w `title` i w DOM dla czytnika ekranu.
+const CELL_TRUNCATE = "max-w-[24rem] overflow-hidden text-ellipsis whitespace-nowrap [&_div]:truncate";
+
+function cellProps<T>(column: Column<T>, row: T): { className: string; title?: string; children: ReactNode } {
+  const children = column.render(row);
+  const text = typeof children === "string" || typeof children === "number" ? String(children) : column.title?.(row);
+  // kolumna akcji (pusty nagłówek) nie jest ucinana, żeby nie chować przycisków
+  const layout = column.wrap ? "break-words" : column.header ? CELL_TRUNCATE : "whitespace-nowrap [&>div]:flex-nowrap";
+  return { className: `${layout} ${column.mono ? "mono" : ""}`, title: text || undefined, children };
 }
 
 interface DataTableProps<T> {
@@ -54,7 +71,7 @@ export function DataTable<T>({ columns, rows, rowKey, emptyText = "Brak danych",
       {filtered.length === 0 ? (
         <p className="my-3.5 text-muted">{needle ? "Brak wyników dla filtra" : emptyText}</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full" aria-label={label}>
             <thead>
               <tr>
@@ -69,7 +86,7 @@ export function DataTable<T>({ columns, rows, rowKey, emptyText = "Brak danych",
               {visible.map((row, index) => (
                 <tr key={rowKey(row, index)}>
                   {columns.map((column) => (
-                    <td key={column.header}>{column.render(row)}</td>
+                    <td key={column.header} {...cellProps(column, row)} />
                   ))}
                 </tr>
               ))}

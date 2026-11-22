@@ -19,10 +19,10 @@ const KIND_COLORS: Record<ChangeKind, string> = {
 
 const COLUMNS: Column<Change>[] = [
   { header: "Typ", render: (c) => <span className={`font-medium ${KIND_COLORS[c.kind]}`}>{KIND_LABELS[c.kind]}</span> },
-  { header: "Usługa / host", render: (c) => c.entity_key },
+  { header: "Usługa / host", mono: true, render: (c) => c.entity_key },
   { header: "Pole", render: (c) => c.field ?? "" },
-  { header: "Przed", render: (c) => c.before ?? "" },
-  { header: "Po", render: (c) => c.after ?? "" },
+  { header: "Przed", mono: true, render: (c) => c.before ?? "" },
+  { header: "Po", mono: true, render: (c) => c.after ?? "" },
 ];
 
 export function ChangeTable({ changes, label = "Zmiany" }: { changes: Change[]; label?: string }) {

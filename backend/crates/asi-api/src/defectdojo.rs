@@ -7,10 +7,10 @@ use asi_core::export::ResultRow;
 use asi_core::rbac;
 use axum::extract::{Path, State};
 use axum::Json;
-use chrono::Utc;
 use reqwest::multipart::{Form, Part};
 use serde_json::{json, Value};
 use std::time::Duration;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -32,9 +32,19 @@ impl DefectDojo {
 }
 
 /// Findingi: wykryte technologie i nowe usługi; pomija korekty `false_positive`.
-pub fn build_report(rows: &[ResultRow], new_keys: &[String]) -> Value {
-    let today = Utc::now().format("%Y-%m-%d").to_string();
+pub fn build_report(rows: &[ResultRow], new_keys: &[String]) -> anyhow::Result<Value> {
+    let today = OffsetDateTime::now_utc().date().to_string();
     let mut findings = Vec::new();
+    let mut size = 0;
+    let mut add = |finding: Value| -> anyhow::Result<()> {
+        size += serde_json::to_vec(&finding)?.len() + 1;
+        anyhow::ensure!(
+            size <= 32 * 1024 * 1024 && findings.len() < 10000,
+            "Raport przekracza limit 32 MiB lub 10000 wpisów"
+        );
+        findings.push(finding);
+        Ok(())
+    };
     for r in rows
         .iter()
         .filter(|r| r.status.as_deref() != Some("false_positive"))
@@ -58,7 +68,7 @@ pub fn build_report(rows: &[ResultRow], new_keys: &[String]) -> Value {
             if let Some(owner) = &r.owner {
                 description.push_str(&format!("\nWłaściciel: {owner}"));
             }
-            findings.push(json!({
+            add(json!({
                 "title": format!("{} na {}:{}", d.name, r.ip, r.port),
                 "severity": r.severity.clone().unwrap_or_else(|| "Info".into()),
                 "date": today,
@@ -67,19 +77,19 @@ pub fn build_report(rows: &[ResultRow], new_keys: &[String]) -> Value {
                 "component_version": d.version,
                 "unique_id_from_tool": format!("asi|{}|{}", r.key, d.signature_id),
                 "endpoints": [{ "host": r.ip, "port": r.port }],
-            }));
+            }))?;
         }
     }
     for key in new_keys {
-        findings.push(json!({
+        add(json!({
             "title": format!("Nowa usługa: {key}"),
             "severity": "Info",
             "date": today,
             "description": format!("Usługa pojawiła się w przebiegu: {key}"),
             "unique_id_from_tool": format!("asi|new|{key}"),
-        }));
+        }))?;
     }
-    json!({ "findings": findings })
+    Ok(json!({ "findings": findings }))
 }
 
 /// Błąd wysyłki: DefectDojo niedostępne lub odrzuciło raport (API: 502) albo błąd wewnętrzny.
@@ -100,15 +110,20 @@ pub async fn push_run(
     dd: &DefectDojo,
     id: Uuid,
 ) -> Result<(usize, Value), PushError> {
+    let _permit = st
+        .exports
+        .try_acquire()
+        .map_err(|_| PushError::Upstream("Eksport w toku".into()))?;
     let rows = all_rows(st, id)
         .await
         .map_err(|e| PushError::Internal(anyhow::anyhow!("{e:?}")))?;
-    let new_keys: Vec<String> =
-        sqlx::query_scalar("SELECT entity_key FROM changes WHERE run_id = $1 AND kind = 'new'")
-            .bind(id)
-            .fetch_all(&st.db)
-            .await?;
-    let report = build_report(&rows, &new_keys);
+    let new_keys: Vec<String> = sqlx::query_scalar(
+        "SELECT entity_key FROM changes WHERE run_id = $1 AND kind = 'new' LIMIT 10001",
+    )
+    .bind(id)
+    .fetch_all(&st.db)
+    .await?;
+    let report = build_report(&rows, &new_keys)?;
     let findings = report["findings"].as_array().map_or(0, Vec::len);
 
     let file = Part::bytes(serde_json::to_vec(&report)?)
@@ -120,11 +135,11 @@ pub async fn push_run(
         .text("minimum_severity", "Info")
         .text("active", "true")
         .text("verified", "false")
-        .text("scan_date", Utc::now().format("%Y-%m-%d").to_string())
+        .text("scan_date", OffsetDateTime::now_utc().date().to_string())
         .part("file", file);
     let url = format!("{}/api/v2/import-scan/", dd.url.trim_end_matches('/'));
     // timeout: zawieszone DefectDojo nie może blokować automatycznej wysyłki po skanie w nieskończoność
-    let res = reqwest::Client::builder()
+    let mut res = reqwest::Client::builder()
         .timeout(Duration::from_secs(300))
         .build()?
         .post(url)
@@ -134,7 +149,16 @@ pub async fn push_run(
         .await
         .map_err(|e| PushError::Upstream(format!("DefectDojo niedostępne: {e}")))?;
     let status = res.status();
-    let body = res.text().await.unwrap_or_default();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = res.chunk().await? {
+        if bytes.len() + chunk.len() > 1024 * 1024 {
+            return Err(PushError::Upstream(
+                "Odpowiedź DefectDojo przekracza 1 MiB".into(),
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let body = String::from_utf8_lossy(&bytes);
     if !status.is_success() {
         return Err(PushError::Upstream(format!(
             "DefectDojo zwróciło {status}: {body}"

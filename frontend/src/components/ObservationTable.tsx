@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { INTEREST_HINT, interestLabel, interestScore } from "../interest";
-import { EditableText } from "../pages/TargetsPage";
+import { EditableText } from "./EditableText";
 import type { Detection, ResultRow } from "../types";
 import { BADGE, BTN_SECONDARY, errorMessage } from "../utils";
 import { DataTable, type Column } from "./DataTable";
@@ -72,6 +72,8 @@ export function ObservationTable({ rows, editable, onChanged, onError }: Props) 
   const columns: Column<ResultRow>[] = [
     {
       header: "Usługa",
+      mono: true,
+      title: (o) => [o.key, o.hostname].filter(Boolean).join(" "),
       render: (o) => (
         <>
           {o.key}
@@ -92,6 +94,7 @@ export function ObservationTable({ rows, editable, onChanged, onError }: Props) 
     },
     {
       header: "Serwis",
+      title: (o) => serviceText(o),
       render: (o) => {
         const raw = serviceText({ service: o.raw_service, product: o.raw_product, version: o.raw_version });
         const shown = serviceText(o);
@@ -103,9 +106,10 @@ export function ObservationTable({ rows, editable, onChanged, onError }: Props) 
         );
       },
     },
-    { header: "HTTP", render: (o) => o.http?.status ?? "" },
+    { header: "HTTP", mono: true, render: (o) => o.http?.status ?? "" },
     {
       header: "Tytuł / ciasteczka",
+      title: (o) => [o.http?.title, ...(o.http?.cookies.map((c) => `${c.name} [${c.attributes.join("; ")}]`) ?? [])].filter(Boolean).join(" | "),
       render: (o) => (
         <>
           {o.http?.title ?? ""}
@@ -115,9 +119,10 @@ export function ObservationTable({ rows, editable, onChanged, onError }: Props) 
         </>
       ),
     },
-    { header: "Technologie", render: (o) => o.technologies.map((d) => <DetectionBadge key={d.signature_id} detection={d} />) },
+    { header: "Technologie", wrap: true, render: (o) => o.technologies.map((d) => <DetectionBadge key={d.signature_id} detection={d} />) },
     {
       header: "Status",
+      wrap: true,
       render: (o) =>
         editable ? (
           <select aria-label={`Status ${o.key}`} value={o.status ?? ""} onChange={(e) => save(o, "status", e.target.value)}>
@@ -133,6 +138,7 @@ export function ObservationTable({ rows, editable, onChanged, onError }: Props) 
     },
     {
       header: "Notatka",
+      wrap: true,
       render: (o) => (editable ? <EditableText label={`Notatka ${o.key}`} value={o.note ?? ""} onSave={(v) => save(o, "note", v)} /> : o.note),
     },
     {
@@ -152,7 +158,9 @@ export function ObservationTable({ rows, editable, onChanged, onError }: Props) 
           <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} />
           Grupuj podobne usługi
         </label>
-        <span className="text-muted">Kolejność: od najwyższej oceny. {INTEREST_HINT}</span>
+        <span className="text-xs text-muted" title={INTEREST_HINT}>
+          sort: ocena ↓
+        </span>
       </div>
 
       {grouped ? (
@@ -162,12 +170,13 @@ export function ObservationTable({ rows, editable, onChanged, onError }: Props) 
           rowKey={(g) => g.name}
           filterBy={(g) => [g.name, ...g.technologies].join(" ")}
           columns={[
-            { header: "Usługa", render: (g) => g.name },
+            { header: "Usługa", mono: true, render: (g) => g.name },
             { header: "Liczba", render: (g) => g.members.length },
             { header: "Technologie", render: (g) => g.technologies.join(", ") },
             { header: "Najwyższa ocena", render: (g) => `${g.topScore} (${interestLabel(g.topScore)})` },
             {
               header: "Przykłady",
+              mono: true,
               render: (g) => g.members.slice(0, 5).map((m) => m.key).join(", ") + (g.members.length > 5 ? ` i ${g.members.length - 5} więcej` : ""),
             },
           ]}
@@ -338,9 +347,8 @@ function CorrectionForm({ row: o, onSave }: { row: ResultRow; onSave: (row: Resu
           </div>
         ))}
       </div>
-      <p className="text-muted">
-        Korekta dotyczy tej usługi (adres:port) również w kolejnych skanach i trafia do eksportu. Priorytet jest wysyłany do DefectDojo jako
-        severity. Puste pole przywraca wartość z pomiaru. Zapis: Enter albo wyjście z pola.
+      <p className="text-xs text-muted" title="Korekta dotyczy adresu:portu także w kolejnych skanach i trafia do eksportu; priorytet idzie do DefectDojo jako severity.">
+        trwała dla ip:port · puste = wartość z pomiaru · zapis: Enter lub blur
       </p>
     </>
   );

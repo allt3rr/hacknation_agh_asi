@@ -66,12 +66,21 @@ pub(crate) async fn to_rows(
 /// Wszystkie wiersze przebiegu (stronami po 500, żeby nie deszyfrować wszystkiego naraz w jednym zapytaniu).
 pub(crate) async fn all_rows(st: &AppState, run_id: Uuid) -> ApiResult<Vec<ResultRow>> {
     let mut out = Vec::new();
+    let mut bytes = 0usize;
     let mut offset = 0;
     loop {
         let (total, items) =
-            views::observations_page(&st.db, &st.crypto, run_id, None, PAGE_MAX, offset).await?;
+            views::observations_page(&st.db, &st.crypto, run_id, None, 32, offset).await?;
         let n = items.len() as i64;
-        out.extend(to_rows(st, run_id, items).await?);
+        for row in to_rows(st, run_id, items).await? {
+            bytes += serde_json::to_vec(&row)?.len();
+            if bytes > 32 * 1024 * 1024 {
+                return Err(ApiError::Conflict(
+                    "Eksport przekracza limit 32 MiB. Pobierz wyniki stronami.".into(),
+                ));
+            }
+            out.push(row);
+        }
         offset += n;
         if n == 0 || offset >= total {
             return Ok(out);
@@ -188,6 +197,10 @@ pub async fn export_run(
 ) -> ApiResult<Response> {
     user.require(rbac::EXPORT)?;
     existing_run(&st, id).await?;
+    let _permit = st
+        .exports
+        .try_acquire()
+        .map_err(|_| ApiError::Conflict("Eksport w toku".into()))?;
     let rows = all_rows(&st, id).await?;
     let (body, mime, ext) = match q.format.as_str() {
         "csv" => {
@@ -434,7 +447,7 @@ pub async fn create_signatures(
     let sigs = parse_signatures(&b.yaml)?;
     let mut created = Vec::new();
     for s in &sigs {
-        let yaml = serde_yaml::to_string(&vec![s]).map_err(anyhow::Error::from)?;
+        let yaml = serde_saphyr::to_string(&vec![s]).map_err(anyhow::Error::from)?;
         if !rules::create(&st.db, &s.id, &yaml, user.0.id).await? {
             return Err(ApiError::Conflict(format!(
                 "Sygnatura {} już istnieje (użyj PUT, aby dodać wersję)",
@@ -470,7 +483,7 @@ pub async fn update_signature(
             "YAML musi zawierać dokładnie sygnaturę o id {slug}"
         )));
     }
-    let yaml = serde_yaml::to_string(&sigs).map_err(anyhow::Error::from)?;
+    let yaml = serde_saphyr::to_string(&sigs).map_err(anyhow::Error::from)?;
     if !rules::new_version(&st.db, &slug, &yaml, user.0.id).await? {
         return Err(ApiError::NotFound);
     }

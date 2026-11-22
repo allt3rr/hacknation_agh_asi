@@ -1,9 +1,9 @@
 //! Własne sygnatury (tabela `rules`): wersjonowane, wyłączane zamiast usuwania.
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::PgPool;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -12,7 +12,8 @@ pub struct RuleRow {
     pub version: i32,
     pub yaml: String,
     pub enabled: bool,
-    pub created_at: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
 }
 
 /// Najnowsza wersja każdej sygnatury.

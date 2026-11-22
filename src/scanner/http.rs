@@ -56,7 +56,7 @@ impl HttpProber {
             let next = url.join(loc)?;
             info.redirects.push(next.to_string());
             // Ostrożność: nie podążamy za przekierowaniem na inny host.
-            if next.host_str() != url.host_str() {
+            if next.origin() != base_url.origin() {
                 break;
             }
             url = next;
@@ -84,8 +84,8 @@ impl HttpProber {
             }
         }
 
-        let bytes = resp.bytes().await?;
-        let slice = &bytes[..bytes.len().min(self.body_limit)];
+        let bytes = self.read_limited(resp).await?;
+        let slice = bytes.as_slice();
         info.body_sha256 = Some(sha256_hex(slice));
         info.body = String::from_utf8_lossy(slice).into_owned();
         info.title = extract_title(&info.body);
@@ -98,12 +98,22 @@ impl HttpProber {
         Ok(info)
     }
 
+    async fn read_limited(&self, mut response: reqwest::Response) -> Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        while bytes.len() < self.body_limit {
+            let Some(chunk) = response.chunk().await? else { break };
+            bytes.extend_from_slice(&chunk[..chunk.len().min(self.body_limit - bytes.len())]);
+        }
+        Ok(bytes)
+    }
+
     async fn fetch_path(&self, base: &Url, path: &str) -> Result<PathProbe> {
         let url = base.join(path)?;
+        anyhow::ensure!(url.origin() == base.origin(), "Ścieżka poza zakresem");
         let resp = self.client.get(url).send().await?;
         let status = resp.status().as_u16();
-        let bytes = resp.bytes().await?;
-        let slice = &bytes[..bytes.len().min(self.body_limit)];
+        let bytes = self.read_limited(resp).await?;
+        let slice = bytes.as_slice();
         Ok(PathProbe {
             status,
             sha256: Some(sha256_hex(slice)),

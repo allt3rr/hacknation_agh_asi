@@ -2,11 +2,11 @@
 //! zaległości z poprzedniego przebiegu i odczyt.
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::HashMap;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 /// Dzierżawa przedłużana co `HEARTBEAT_SECS`; po `LEASE_SECS` bez odnowienia przebieg jest osierocony.
@@ -20,13 +20,16 @@ pub struct RunView {
     pub status: String,
     pub reason: Option<String>,
     pub coverage: Value,
-    pub started_at: Option<DateTime<Utc>>,
-    pub finished_at: Option<DateTime<Utc>>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub started_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub finished_at: Option<OffsetDateTime>,
     pub duration_ms: Option<i64>,
     pub hosts_total: i32,
     pub hosts_done: i32,
     pub triggered_by: Option<Uuid>,
-    pub created_at: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
 }
 
 const RUN_COLUMNS: &str =
@@ -71,15 +74,25 @@ pub async fn reserve_scan(
     }
 }
 
-/// Przedłuża dzierżawę. `false` = przebieg anulowany albo przejęty: właściciel ma przerwać pracę.
-pub async fn heartbeat(db: &PgPool, run_id: Uuid, owner: &str) -> Result<bool> {
+/// Przedłuża dzierżawę i zapisuje postęp (`hosts_done` przycięte do `hosts_total`).
+/// `false` = przebieg anulowany albo przejęty: właściciel ma przerwać pracę.
+pub async fn heartbeat(
+    db: &PgPool,
+    run_id: Uuid,
+    owner: &str,
+    hosts_total: i32,
+    hosts_done: i32,
+) -> Result<bool> {
     let res = sqlx::query(
-        "UPDATE scan_runs SET lease_until = now() + make_interval(secs => $3)
+        "UPDATE scan_runs SET lease_until = now() + make_interval(secs => $3),
+                hosts_total = $4, hosts_done = LEAST($5, $4)
          WHERE id = $1 AND lease_owner = $2 AND status = 'running'",
     )
     .bind(run_id)
     .bind(owner)
     .bind(LEASE_SECS as f64)
+    .bind(hosts_total)
+    .bind(hosts_done)
     .execute(db)
     .await?;
     Ok(res.rows_affected() == 1)
@@ -132,7 +145,7 @@ pub async fn resume_targets(db: &PgPool) -> Result<HashMap<String, i32>> {
 }
 
 /// Kiedy zakończył się ostatni skan (bez importów) i czy zostawił zaległości.
-pub async fn last_scan(db: &PgPool) -> Result<Option<(DateTime<Utc>, String)>> {
+pub async fn last_scan(db: &PgPool) -> Result<Option<(OffsetDateTime, String)>> {
     Ok(sqlx::query_as(
         "SELECT COALESCE(started_at, created_at), status FROM scan_runs
          WHERE kind = 'scan' AND status <> 'running' ORDER BY created_at DESC LIMIT 1",
@@ -209,7 +222,7 @@ mod tests {
             .await
             .unwrap()
             .is_none());
-        assert!(heartbeat(&db, first, "a").await.unwrap());
+        assert!(heartbeat(&db, first, "a", 0, 0).await.unwrap());
 
         sqlx::query("UPDATE scan_runs SET lease_until = now() - interval '1 second'")
             .execute(&db)
@@ -225,16 +238,34 @@ mod tests {
             ("failed", Some("utracona dzierżawa"))
         );
         assert!(
-            !heartbeat(&db, first, "a").await.unwrap(),
+            !heartbeat(&db, first, "a", 0, 0).await.unwrap(),
             "stary właściciel traci dzierżawę"
         );
 
         assert!(cancel(&db, second).await.unwrap());
-        assert!(!heartbeat(&db, second, "b").await.unwrap());
+        assert!(!heartbeat(&db, second, "b", 0, 0).await.unwrap());
         assert_eq!(
             get_run(&db, second).await.unwrap().unwrap().status,
             "cancelled"
         );
+    }
+
+    #[sqlx::test(migrator = "MIGRATOR")]
+    async fn heartbeat_records_progress(db: PgPool) {
+        let run = reserve_scan(&db, "a", None, &json!({}))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(heartbeat(&db, run, "a", 10, 4).await.unwrap());
+        let r = get_run(&db, run).await.unwrap().unwrap();
+        assert_eq!((r.hosts_total, r.hosts_done), (10, 4));
+
+        assert!(heartbeat(&db, run, "a", 10, 99).await.unwrap());
+        assert_eq!(get_run(&db, run).await.unwrap().unwrap().hosts_done, 10);
+
+        assert!(!heartbeat(&db, run, "obcy", 20, 0).await.unwrap());
+        let r = get_run(&db, run).await.unwrap().unwrap();
+        assert_eq!((r.hosts_total, r.hosts_done), (10, 10));
     }
 
     #[sqlx::test(migrator = "MIGRATOR")]

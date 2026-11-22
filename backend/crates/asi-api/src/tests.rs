@@ -29,7 +29,7 @@ pub(crate) fn state(db: &PgPool) -> AppState {
 }
 
 pub(crate) async fn prepared(db: &PgPool) -> AppState {
-    asi_db::prepare(db).await.unwrap();
+    asi_db::prepare(db, Some("fixture-password")).await.unwrap();
     state(db)
 }
 
@@ -115,7 +115,7 @@ async fn health_ok_then_503_when_db_down(db: PgPool) {
 #[sqlx::test(migrator = "asi_db::MIGRATOR")]
 async fn demo_admin_logs_in_with_cookie(db: PgPool) {
     let st = prepared(&db).await;
-    let res = login_as(&st, "admin", "admin").await;
+    let res = login_as(&st, "admin", "fixture-password").await;
     assert_eq!(res.status(), StatusCode::OK);
     let cookie = set_cookie(&res).unwrap();
     for attr in [
@@ -153,7 +153,9 @@ async fn demo_admin_logs_in_with_cookie(db: PgPool) {
 
 #[sqlx::test(migrator = "asi_db::MIGRATOR")]
 async fn secure_cookie_when_configured(db: PgPool) {
-    asi_db::prepare(&db).await.unwrap();
+    asi_db::prepare(&db, Some("fixture-password"))
+        .await
+        .unwrap();
     let st = AppState::new(
         db.clone(),
         ApiConfig {
@@ -163,9 +165,11 @@ async fn secure_cookie_when_configured(db: PgPool) {
         demo_crypto(),
     )
     .unwrap();
-    assert!(set_cookie(&login_as(&st, "admin", "admin").await)
-        .unwrap()
-        .contains("Secure"));
+    assert!(
+        set_cookie(&login_as(&st, "admin", "fixture-password").await)
+            .unwrap()
+            .contains("Secure")
+    );
 }
 
 #[sqlx::test(migrator = "asi_db::MIGRATOR")]
@@ -208,7 +212,7 @@ async fn sixth_attempt_is_blocked_even_with_correct_password(db: PgPool) {
             StatusCode::UNAUTHORIZED
         );
     }
-    let res = login_as(&st, "admin", "admin").await;
+    let res = login_as(&st, "admin", "fixture-password").await;
     assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
     assert!(set_cookie(&res).is_none());
 }
@@ -232,14 +236,17 @@ async fn health_answers_during_parallel_logins(db: PgPool) {
         StatusCode::OK
     );
     for l in logins {
-        assert_eq!(l.await.unwrap().status(), StatusCode::UNAUTHORIZED);
+        assert!(matches!(
+            l.await.unwrap().status(),
+            StatusCode::UNAUTHORIZED | StatusCode::TOO_MANY_REQUESTS
+        ));
     }
 }
 
 #[sqlx::test(migrator = "asi_db::MIGRATOR")]
 async fn session_survives_restart_expires_and_follows_credential_version(db: PgPool) {
     let st = prepared(&db).await;
-    let pair = cookie_pair(&login_as(&st, "admin", "admin").await);
+    let pair = cookie_pair(&login_as(&st, "admin", "fixture-password").await);
 
     let restarted = state(&db);
     assert_eq!(
@@ -260,7 +267,7 @@ async fn session_survives_restart_expires_and_follows_credential_version(db: PgP
         StatusCode::UNAUTHORIZED
     );
 
-    let pair = cookie_pair(&login_as(&st, "admin", "admin").await);
+    let pair = cookie_pair(&login_as(&st, "admin", "fixture-password").await);
     sqlx::query("UPDATE sessions SET expires_at = now() - interval '1 second'")
         .execute(&db)
         .await
@@ -276,7 +283,7 @@ async fn session_survives_restart_expires_and_follows_credential_version(db: PgP
 #[sqlx::test(migrator = "asi_db::MIGRATOR")]
 async fn logout_always_clears_cookie(db: PgPool) {
     let st = prepared(&db).await;
-    let pair = cookie_pair(&login_as(&st, "admin", "admin").await);
+    let pair = cookie_pair(&login_as(&st, "admin", "fixture-password").await);
 
     let res = call(&st, "POST", "/api/v1/auth/logout", Some(&pair), None).await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
@@ -363,4 +370,11 @@ async fn static_frontend_with_spa_fallback(db: PgPool) {
     let res = app.clone().oneshot(get("/api/v1/me")).await.unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     std::fs::remove_dir_all(dir).ok();
+}
+
+#[sqlx::test(migrator = "asi_db::MIGRATOR")]
+async fn login_rejects_oversized_payload(db: PgPool) {
+    let st = prepared(&db).await;
+    let res = login_as(&st, "admin", &"a".repeat(20 * 1024)).await;
+    assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }

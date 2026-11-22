@@ -195,7 +195,7 @@ impl SignatureSet {
 
     pub fn parse_yaml(text: &str) -> Result<Vec<Signature>> {
         let parsed: OneOrMany =
-            serde_yaml::from_str(text).context("YAML sygnatury: niepoprawny format")?;
+            serde_saphyr::from_str(text).context("YAML sygnatury: niepoprawny format")?;
         Ok(match parsed {
             OneOrMany::Many(v) => v,
             OneOrMany::One(s) => vec![s],

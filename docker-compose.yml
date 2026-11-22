@@ -1,17 +1,17 @@
 # Uruchomienie:
 #   docker compose up -d --build                    baza + backend ze skanerem i interfejsem (http://127.0.0.1:8080)
 #   docker compose --profile lab up -d --build      to samo plus laboratorium (sieć 172.30.100.0/24)
-# Konto demo: admin / admin. Zmienne: ASI_PORT, ASI_PROJECT, ASI_DB_PASSWORD, ASI_SCAN_CONFIG, ASI_DD_*.
+# Pierwszy start wymaga ASI_ADMIN_PASSWORD. Zmienne: ASI_PORT, ASI_PROJECT, ASI_DB_PASSWORD, ASI_SCAN_CONFIG, ASI_DD_*.
 name: ${ASI_PROJECT:-asi}
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857
     restart: unless-stopped
     environment:
       POSTGRES_DB: asi
       POSTGRES_USER: asi
-      POSTGRES_PASSWORD: ${ASI_DB_PASSWORD:-asi-demo}
+      POSTGRES_PASSWORD: ${ASI_DB_PASSWORD:?Ustaw ASI_DB_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -23,7 +23,7 @@ services:
   # Klucz szyfrowania pól tworzony raz, w osobnym wolumenie (nie w wolumenie bazy).
   # W produkcji zamiast tego dostarcz plik klucza z zewnętrznego źródła sekretów (ASI_MASTER_KEY_FILE).
   keygen:
-    image: alpine:3.22
+    image: alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f
     command:
       - sh
       - -c
@@ -42,7 +42,8 @@ services:
       keygen:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgres://asi:${ASI_DB_PASSWORD:-asi-demo}@db:5432/asi
+      ASI_ADMIN_PASSWORD: ${ASI_ADMIN_PASSWORD:-}
+      DATABASE_URL: postgres://asi:${ASI_DB_PASSWORD:?Ustaw ASI_DB_PASSWORD}@db:5432/asi
       ASI_MASTER_KEY_FILE: /run/asi-keys/master_key
       ASI_COOKIE_SECURE: ${ASI_COOKIE_SECURE:-false}
       ASI_SESSION_TTL_HOURS: ${ASI_SESSION_TTL_HOURS:-12}

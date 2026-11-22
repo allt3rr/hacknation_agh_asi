@@ -120,23 +120,15 @@ pub fn new_token() -> String {
 }
 
 /// Przy pierwszym uruchomieniu tworzy konto `admin`.
-/// Hasło pochodzi z `ASI_ADMIN_PASSWORD` albo jest generowane i wypisywane w logu.
+/// Hasło pochodzi z `ASI_ADMIN_PASSWORD` i wymaga co najmniej 10 znaków.
 pub async fn bootstrap_admin(st: &AppState) -> Result<()> {
     if db::count_users(&st.db).await? > 0 {
         return Ok(());
     }
 
-    let (password, generated) = match std::env::var("ASI_ADMIN_PASSWORD") {
-        Ok(password) if !password.is_empty() => (password, false),
-        _ => (new_token()[..20].to_string(), true),
-    };
+    let password = std::env::var("ASI_ADMIN_PASSWORD").unwrap_or_default();
+    anyhow::ensure!(password.chars().count() >= 10, "Pierwszy start wymaga ASI_ADMIN_PASSWORD (minimum 10 znaków)");
     db::create_user(&st.db, "admin", &hash_password(&password)?, Role::Admin).await?;
-
-    if generated {
-        tracing::warn!("Utworzono konto 'admin' z hasłem: {password}. Zmień je po zalogowaniu.");
-    } else {
-        tracing::info!("Utworzono konto 'admin' z hasłem z ASI_ADMIN_PASSWORD");
-    }
     Ok(())
 }
 

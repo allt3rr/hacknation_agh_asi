@@ -90,9 +90,8 @@ export function SignaturesPage({ session }: { session: Session }) {
                 Anuluj edycję
               </button>
             )}
-            <span id="signature-hint" className="text-muted">
-              Reguły mogą sprawdzać nagłówek, ciasteczko, tytuł strony, fragment HTML lub odpowiedź ścieżki (tylko GET, bez logowania). Ścieżka w regule
-              `path` musi zaczynać się od „/” i nie może wskazywać innego hosta.
+            <span id="signature-hint" className="text-xs text-muted">
+              header | cookie | title | body | path (GET, bez logowania; <code>path</code> od „/”, ten sam host)
             </span>
           </div>
         </Card>
@@ -105,7 +104,7 @@ export function SignaturesPage({ session }: { session: Session }) {
           label="Własne sygnatury"
           emptyText="Brak własnych sygnatur"
           columns={[
-            { header: "ID", render: (s) => s.slug },
+            { header: "ID", mono: true, render: (s) => s.slug },
             { header: "Wersja", render: (s) => s.version },
             { header: "Stan", render: (s) => (s.enabled ? "aktywna" : "wyłączona") },
             { header: "Zmieniono", render: (s) => formatDate(s.created_at) },
@@ -137,7 +136,7 @@ export function SignaturesPage({ session }: { session: Session }) {
           label="Wbudowane sygnatury"
           filterBy={(s) => [s.id, s.name, s.category].join(" ")}
           columns={[
-            { header: "ID", render: (s) => s.id },
+            { header: "ID", mono: true, render: (s) => s.id },
             { header: "Nazwa", render: (s) => s.name },
             { header: "Kategoria", render: (s) => <span className={BADGE}>{s.category}</span> },
           ]}

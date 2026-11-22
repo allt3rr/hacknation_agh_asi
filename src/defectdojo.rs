@@ -8,7 +8,7 @@ use crate::config::DefectDojoConfig;
 use crate::diff::{Change, ChangeKind};
 use crate::model::{Detection, Observation};
 use anyhow::{bail, Context, Result};
-use chrono::Utc;
+use time::OffsetDateTime;
 use reqwest::multipart::{Form, Part};
 use serde_json::{json, Value};
 
@@ -101,5 +101,5 @@ fn new_service_finding(change: &Change) -> Value {
 }
 
 fn today() -> String {
-    Utc::now().format("%Y-%m-%d").to_string()
+    OffsetDateTime::now_utc().date().to_string()
 }

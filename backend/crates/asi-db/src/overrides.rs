@@ -2,10 +2,10 @@
 
 use anyhow::Result;
 use asi_crypto::{aad, FieldCrypto};
-use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::PgPool;
 use std::collections::HashMap;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 pub const ENTITY: &str = "service";
@@ -21,8 +21,10 @@ pub struct OverrideRow {
     pub value: Option<String>,
     pub reason: Option<String>,
     pub author: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub revoked_at: Option<DateTime<Utc>>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub revoked_at: Option<OffsetDateTime>,
 }
 
 fn value_aad(id: Uuid) -> String {
@@ -87,8 +89,8 @@ type Row = (
     Option<Vec<u8>>,
     Option<String>,
     Option<String>,
-    DateTime<Utc>,
-    Option<DateTime<Utc>>,
+    OffsetDateTime,
+    Option<OffsetDateTime>,
 );
 
 pub async fn history(db: &PgPool, crypto: &FieldCrypto, key: &str) -> Result<Vec<OverrideRow>> {

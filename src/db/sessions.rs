@@ -2,7 +2,7 @@
 
 use super::{now, Db};
 use anyhow::Result;
-use chrono::Utc;
+use time::OffsetDateTime;
 
 /// Użytkownik ważnej sesji z aktualną rolą z tabeli `users`.
 #[derive(Debug, sqlx::FromRow)]
@@ -36,7 +36,7 @@ pub async fn find_session_user(db: &Db, token_hash: &str) -> Result<Option<Sessi
          WHERE s.id_hash = ? AND s.expires_at > ?",
     )
     .bind(token_hash)
-    .bind(Utc::now().timestamp())
+    .bind(OffsetDateTime::now_utc().unix_timestamp())
     .fetch_optional(db)
     .await?;
     Ok(user)
@@ -60,7 +60,7 @@ pub async fn delete_user_sessions(db: &Db, user_id: &str) -> Result<()> {
 
 pub async fn delete_expired_sessions(db: &Db) -> Result<()> {
     sqlx::query("DELETE FROM sessions WHERE expires_at <= ?")
-        .bind(Utc::now().timestamp())
+        .bind(OffsetDateTime::now_utc().unix_timestamp())
         .execute(db)
         .await?;
     Ok(())
@@ -78,10 +78,10 @@ mod tests {
         let user = create_user(&db, "anna", "hash", Role::Viewer)
             .await
             .unwrap();
-        let future = Utc::now().timestamp() + 3600;
+        let future = OffsetDateTime::now_utc().unix_timestamp() + 3600;
 
         create_session(&db, "valid", &user, future).await.unwrap();
-        create_session(&db, "expired", &user, Utc::now().timestamp() - 1)
+        create_session(&db, "expired", &user, OffsetDateTime::now_utc().unix_timestamp() - 1)
             .await
             .unwrap();
 
@@ -107,7 +107,7 @@ mod tests {
     async fn deleting_user_removes_sessions() {
         let db = connect_memory().await.unwrap();
         let user = create_user(&db, "jan", "hash", Role::Editor).await.unwrap();
-        create_session(&db, "h", &user, Utc::now().timestamp() + 60)
+        create_session(&db, "h", &user, OffsetDateTime::now_utc().unix_timestamp() + 60)
             .await
             .unwrap();
 

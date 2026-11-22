@@ -24,7 +24,7 @@ pub use targets::*;
 pub use users::*;
 
 use anyhow::Result;
-use chrono::Utc;
+use time::OffsetDateTime;
 use serde_json::{json, Value};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::SqlitePool;
@@ -88,7 +88,7 @@ async fn mark_interrupted_runs(db: &Db) -> Result<()> {
 }
 
 fn now() -> String {
-    Utc::now().to_rfc3339()
+    OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).expect("system time in RFC3339 range")
 }
 
 fn new_id() -> String {

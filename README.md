@@ -11,19 +11,23 @@ Backend: Rust ([`backend/`](backend/README.md) — Axum, sqlx, PostgreSQL 16). F
 ## Szybki start (Docker)
 
 ```bash
-docker compose up -d --build            # http://127.0.0.1:8080, konto demo admin / admin
+# W pliku .env ustaw ASI_ADMIN_PASSWORD (minimum 10 znaków)
+# oraz ASI_DB_PASSWORD (np. osobne losowe hasło z openssl rand -hex 32).
+docker compose up -d --build            # http://127.0.0.1:8080
 ```
 
 Compose uruchamia: `db` (PostgreSQL 16), `keygen` (jednorazowo tworzy klucz szyfrowania w osobnym
 wolumenie `asi-keys`, nie w wolumenie bazy) i `asi` (backend ze skanerem nmap i interfejsem pod tym
-samym adresem). Konto `admin`/`admin` to konto demonstracyjne — nie wystawiaj aplikacji poza
-localhost i sieć labu; hasło zmienisz w zakładce Użytkownicy.
+samym adresem). Konto `admin` powstaje z hasłem startowym wyłącznie na pustej bazie.
+W istniejącym wdrożeniu ustaw ASI_DB_PASSWORD zgodnie z aktualnym hasłem roli PostgreSQL.
+Rotację hasła bazy skoordynuj ze zmianą hasła tej roli. Hasło konta aplikacji zmienisz w zakładce Użytkownicy.
 
 | Zmienna | Domyślnie | Opis |
 |---|---|---|
+| `ASI_ADMIN_PASSWORD` | wymagane przy pierwszym starcie | hasło pierwszego administratora |
 | `ASI_PORT` | `8080` | port na `127.0.0.1` |
 | `ASI_PROJECT` | `asi` | nazwa projektu compose (np. drugi egzemplarz obok) |
-| `ASI_DB_PASSWORD` | `asi-demo` | hasło bazy |
+| `ASI_DB_PASSWORD` | wymagane | hasło bazy |
 | `ASI_SCAN_CONFIG` | `backend/config/scan.toml` | plik konfiguracji skanu (porty, limity, okna czasowe) |
 | `ASI_SESSION_TTL_HOURS`, `ASI_COOKIE_SECURE` | `12`, `false` | sesja; `true` za HTTPS |
 | `ASI_DD_URL`, `ASI_DD_TOKEN`, `ASI_DD_ENGAGEMENT` | — | DefectDojo: wyniki są wysyłane automatycznie po każdym skanie (błąd tylko w logu) i ręcznie przyciskiem; DefectDojo na hoście: `http://host.docker.internal:8081` |
@@ -46,7 +50,7 @@ Sieć wewnętrzna `172.30.100.0/24` (bez dostępu do internetu):
 | 172.30.100.15:3000 | Grafana | Grafana, panel logowania |
 | 172.30.100.16:443 | Caddy | HTTPS z certyfikatem self-signed |
 
-1. Zaloguj się (`admin`/`admin`), w zakładce **Cele** dodaj `172.30.100.0/27` (lub plik `lab/targets.txt`).
+1. Zaloguj się jako administrator, w zakładce **Cele** dodaj `172.30.100.0/27` (lub plik `lab/targets.txt`).
 2. **Skany → Uruchom skan**; po zakończeniu: **Usługi** (wyniki, technologie, ciasteczka bez wartości) i **Zmiany**.
 3. Jako analityk oznacz usługę (status `false_positive`, notatka) — korekta jest trwała.
 4. Zmień lab, np. `docker compose stop lab-grafana`, i uruchom drugi skan: zmiany `gone`, host `unstable`;

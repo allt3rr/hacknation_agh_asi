@@ -11,5 +11,5 @@ anyhow.workspace = true
 asi-core.workspace = true
 regex.workspace = true
 serde.workspace = true
-serde_yaml.workspace = true
+serde-saphyr.workspace = true
 tracing.workspace = true

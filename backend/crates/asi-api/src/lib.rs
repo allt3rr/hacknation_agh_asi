@@ -46,6 +46,7 @@ pub struct AppState {
     pub crypto: Arc<FieldCrypto>,
     pub scans: Arc<scans::ScanService>,
     pub defectdojo: Option<Arc<defectdojo::DefectDojo>>,
+    exports: Arc<tokio::sync::Semaphore>,
     login: Arc<LoginGuard>,
 }
 
@@ -57,6 +58,7 @@ impl AppState {
             crypto: Arc::new(crypto),
             scans: Arc::new(scans::ScanService::default()),
             defectdojo: None,
+            exports: Arc::new(tokio::sync::Semaphore::new(2)),
             login: Arc::new(LoginGuard::new()?),
         })
     }
@@ -84,7 +86,10 @@ pub fn with_static(router: Router, dir: &std::path::Path) -> Router {
 
 pub fn router(state: AppState) -> Router {
     let v1 = Router::new()
-        .route("/auth/login", post(routes::login))
+        .route(
+            "/auth/login",
+            post(routes::login).layer(DefaultBodyLimit::max(16 * 1024)),
+        )
         .route("/auth/logout", post(routes::logout))
         .route("/auth/config", get(routes::auth_config))
         .route("/me", get(routes::me))
@@ -107,7 +112,10 @@ pub fn router(state: AppState) -> Router {
             patch(manage::update_user).delete(manage::delete_user),
         )
         .route("/admin/audit", get(manage::list_audit))
-        .route("/schedule", get(scans::get_schedule).put(scans::put_schedule))
+        .route(
+            "/schedule",
+            get(scans::get_schedule).put(scans::put_schedule),
+        )
         .route("/runs", get(scans::list_runs).post(scans::post_run))
         .route("/runs/{id}", get(scans::get_run))
         .route("/runs/{id}/cancel", post(scans::cancel_run))

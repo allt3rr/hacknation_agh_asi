@@ -15,7 +15,7 @@ pub struct Entry<'a> {
     pub details: Value,
 }
 
-pub async fn record(db: &PgPool, entry: Entry<'_>) -> Result<()> {
+pub async fn record<'c>(db: impl sqlx::PgExecutor<'c>, entry: Entry<'_>) -> Result<()> {
     sqlx::query("INSERT INTO audit_log (user_id, username, action, entity, entity_id, ip, details) VALUES ($1, $2, $3, $4, $5, $6::inet, $7)")
         .bind(entry.user_id)
         .bind(entry.username)
@@ -39,7 +39,8 @@ pub struct AuditRow {
     pub entity_id: Option<String>,
     pub details: Value,
     pub ip: Option<String>,
-    pub at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub at: time::OffsetDateTime,
 }
 
 /// Najnowsze wpisy; `before` = id, od którego (wyłącznie) czytać starsze.

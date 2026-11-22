@@ -140,7 +140,7 @@ async fn paging_totals_and_dashboard(db: PgPool) {
 #[sqlx::test(migrator = "asi_db::MIGRATOR")]
 async fn secrets_are_redacted_and_reveal_is_audited(db: PgPool) {
     let st = state(&db).await;
-    let admin = cookie_pair(&login_as(&st, "admin", "admin").await);
+    let admin = cookie_pair(&login_as(&st, "admin", "fixture-password").await);
     let viewer = as_role(&st, &db, "vi", rbac::VIEWER).await;
     let analyst = as_role(&st, &db, "an", rbac::ANALYST).await;
     let obs = json!([{ "ip": "10.0.0.1", "port": 80, "proto": "tcp",
@@ -598,7 +598,7 @@ async fn scan_pushes_to_defectdojo_automatically(db: PgPool) {
         .await
         .with_scans(svc)
         .with_defectdojo(dd(port));
-    let admin = cookie_pair(&login_as(&st, "admin", "admin").await);
+    let admin = cookie_pair(&login_as(&st, "admin", "fixture-password").await);
     call(
         &st,
         "POST",

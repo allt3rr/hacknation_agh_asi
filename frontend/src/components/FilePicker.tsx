@@ -25,8 +25,8 @@ export function FilePicker({ accept, label, buttonLabel, onSubmit }: FilePickerP
   };
 
   return (
-    <span className="inline-flex flex-wrap items-center gap-2">
-      <input type="file" accept={accept} aria-label={label} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
+      <input type="file" className="min-w-0 max-w-60 text-xs" accept={accept} aria-label={label} title={label} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
       <button className={BTN_SECONDARY} disabled={!file || busy} aria-busy={busy} onClick={submit}>
         {busy ? "Wysyłanie..." : buttonLabel}
       </button>

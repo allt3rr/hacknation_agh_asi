@@ -47,18 +47,10 @@
   }
 
   body {
-    font: 14px/1.5 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 13px/1.45 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     font-feature-settings: "tnum" 1;
     -webkit-font-smoothing: antialiased;
     @apply min-h-screen bg-bg text-fg;
-    /* poświata i delikatna siatka "konsoli" w tle; czysto dekoracyjne */
-    background-image:
-      radial-gradient(60rem 40rem at 10% -10%, var(--glow), transparent 60%),
-      radial-gradient(50rem 30rem at 110% 10%, rgb(34 211 238 / 0.08), transparent 60%),
-      linear-gradient(color-mix(in srgb, var(--color-line) 55%, transparent) 1px, transparent 1px),
-      linear-gradient(90deg, color-mix(in srgb, var(--color-line) 55%, transparent) 1px, transparent 1px);
-    background-size: auto, auto, 48px 48px, 48px 48px;
-    background-attachment: fixed;
   }
 
   h1,
@@ -70,7 +62,7 @@
   input,
   select,
   textarea {
-    @apply rounded-lg border border-field bg-surface px-2.5 py-1.5 text-fg transition-[border-color,box-shadow] duration-150;
+    @apply rounded border border-field bg-surface px-2 py-1 text-fg transition-[border-color,box-shadow] duration-150;
   }
 
   input:hover,
@@ -84,7 +76,7 @@
   }
 
   button {
-    @apply cursor-pointer rounded-lg bg-accent px-3.5 py-[7px] font-medium text-accent-fg shadow-sm transition-[transform,box-shadow,background-color,opacity] duration-150 hover:-translate-y-px hover:shadow-[0_6px_18px_-6px_var(--glow)] active:translate-y-0 disabled:cursor-default disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm;
+    @apply cursor-pointer rounded bg-accent px-2.5 py-1 font-medium whitespace-nowrap text-accent-fg transition-[background-color,opacity] duration-150 hover:opacity-90 disabled:cursor-default disabled:opacity-50;
   }
 
   /* Wyraźny wskaźnik fokusu dla klawiatury (WCAG 2.4.7). */
@@ -98,11 +90,11 @@
 
   th,
   td {
-    @apply border-b border-line px-3 py-2 text-left align-top break-words;
+    @apply border-b border-line px-2 py-1 text-left align-top;
   }
 
   th {
-    @apply bg-surface-2 text-xs font-semibold tracking-wide text-muted uppercase first:rounded-tl-lg last:rounded-tr-lg;
+    @apply bg-surface-2 text-[11px] font-semibold tracking-wide whitespace-nowrap text-muted uppercase;
   }
 
   tbody tr {
@@ -115,6 +107,17 @@
 }
 
 @layer components {
+  /* Wartości techniczne: IP, porty, CIDR, hashe, nagłówki. */
+  .mono {
+    @apply font-mono text-[12px] tabular-nums;
+  }
+
+  /* Karta widoku aplikacji: płaska, bez rozmycia i cienia. */
+  .panel {
+    @apply min-w-0 rounded border border-line bg-surface;
+  }
+
+  /* .glass i .brand-gradient zostają tylko dla ekranu logowania. */
   /* Szklana karta: lekka przezroczystość nad tłem z poświatą. */
   .glass {
     @apply rounded-2xl border border-line bg-surface/85 backdrop-blur-md;

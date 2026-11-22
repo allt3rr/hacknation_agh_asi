@@ -5,9 +5,11 @@ import { ChangeTable } from "../components/ChangeTable";
 import { DataTable } from "../components/DataTable";
 import { FilePicker } from "../components/FilePicker";
 import { ObservationTable } from "../components/ObservationTable";
+import { ScanProgress } from "../components/ScanProgress";
+import { TargetPicker } from "../components/TargetPicker";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
-import type { Change, Page, ResultRow, Run, RunStatus, Session } from "../types";
+import type { Change, Page, ResultRow, Run, RunStatus, Session, Target } from "../types";
 import { BTN_SECONDARY, STATUS_LABELS, coverageText, downloadBlob, fileFormat, formatDate, formatDuration } from "../utils";
 
 const STATUS_COLORS: Record<RunStatus, string> = {
@@ -20,6 +22,8 @@ const STATUS_COLORS: Record<RunStatus, string> = {
 };
 
 const PAGE_SIZE = 100;
+// bez scans.run lista wyboru nie jest pokazywana, więc nie pobieramy celów (stabilna referencja dla useApiData)
+const noTargets = () => Promise.resolve<Target[]>([]);
 const REFRESH_MS = 5000;
 
 type Details =
@@ -28,10 +32,13 @@ type Details =
 
 export function RunsPage({ session }: { session: Session }) {
   const { data: runs, error, reload } = useApiData(api.runs.list);
+  const canRun = can(session, "scans.run");
+  const { data: targets } = useApiData(canRun ? api.targets.list : noTargets);
   const { info, error: showError, run } = useNotice();
   const [details, setDetails] = useState<Details | null>(null);
   const detailsHeading = useRef<HTMLHeadingElement>(null);
   const scanActive = runs?.some((r) => r.status === "running" || r.status === "queued") ?? false;
+  const running = runs?.find((r) => r.status === "running");
 
   // Lista odświeża się sama, dopóki skan czeka lub trwa.
   useEffect(() => {
@@ -48,12 +55,16 @@ export function RunsPage({ session }: { session: Session }) {
     detailsHeading.current?.scrollIntoView({ block: "start" });
   }, [detailsId]);
 
-  const startScan = () =>
-    run(async () => {
-      await api.runs.start();
-      info("Skan uruchomiony. Lista odświeża się co 5 s, dopóki skan trwa.");
+  const startScan = async (ids: string[]) => {
+    let ok = false;
+    await run(async () => {
+      await api.runs.start(ids);
+      ok = true;
+      info(`Skan uruchomiony na celach: ${ids.length}`);
       await reload();
     });
+    return ok;
+  };
 
   const cancel = (r: Run) =>
     run(async () => {
@@ -85,26 +96,23 @@ export function RunsPage({ session }: { session: Session }) {
 
   return (
     <>
-      {(can(session, "scans.run") || can(session, "targets.create")) && (
-        <Card title="Nowy przebieg">
-          {can(session, "scans.run") && (
-            <div className="my-2 flex flex-wrap items-center gap-2">
-              <button onClick={startScan} disabled={scanActive}>
-                {scanActive ? "Skan w toku..." : "Uruchom skan"}
-              </button>
-              <span className="text-muted">Jeśli w zakładce Harmonogram są okna czasowe, skan można uruchomić tylko w oknie.</span>
-            </div>
-          )}
-          {can(session, "targets.create") && (
-            <div className="my-2 flex flex-wrap items-center gap-2">
-              <span className="text-muted">Import wyników skanu z pliku JSON lub CSV w formacie eksportu ASI:</span>
-              <FilePicker accept=".csv,.json" label="Plik z wynikami skanu" buttonLabel="Importuj" onSubmit={importResults} />
-            </div>
-          )}
-        </Card>
-      )}
+      {running && <ScanProgress run={running} onCancel={canRun ? () => cancel(running) : undefined} />}
 
-      <Card title="Przebiegi" actions={<button className={BTN_SECONDARY} onClick={reload}>Odśwież</button>}>
+      {canRun && <TargetPicker targets={targets ?? []} busy={scanActive} onStart={startScan} />}
+
+      <Card
+        title={`Przebiegi (${runs?.length ?? 0})`}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {can(session, "targets.create") && (
+              <FilePicker accept=".csv,.json" label="Import wyników skanu (JSON/CSV, format eksportu ASI)" buttonLabel="Importuj wyniki" onSubmit={importResults} />
+            )}
+            <button className={BTN_SECONDARY} onClick={reload}>
+              Odśwież
+            </button>
+          </div>
+        }
+      >
         {error && (
           <p role="alert" className="my-3.5 text-red">
             {error}
@@ -116,10 +124,11 @@ export function RunsPage({ session }: { session: Session }) {
           label="Przebiegi skanów"
           emptyText={runs ? "Brak przebiegów" : "Ładowanie..."}
           columns={[
-            { header: "Start", render: (r) => formatDate(r.started_at ?? r.created_at) },
+            { header: "Start", mono: true, render: (r) => formatDate(r.started_at ?? r.created_at) },
             { header: "Rodzaj", render: (r) => (r.kind === "import" ? "import" : "skan") },
             {
               header: "Status",
+              title: (r) => [STATUS_LABELS[r.status] ?? r.status, r.reason].filter(Boolean).join(": "),
               render: (r) => (
                 <>
                   <span className={`font-medium ${STATUS_COLORS[r.status]}`}>{STATUS_LABELS[r.status] ?? r.status}</span>
@@ -127,8 +136,8 @@ export function RunsPage({ session }: { session: Session }) {
                 </>
               ),
             },
-            { header: "Czas trwania", render: (r) => formatDuration(r.duration_ms) },
-            { header: "Pokrycie", render: (r) => <span className="text-muted">{coverageText(r.coverage)}</span> },
+            { header: "Czas", mono: true, render: (r) => formatDuration(r.duration_ms) },
+            { header: "Pokrycie", mono: true, render: (r) => coverageText(r.coverage) },
             {
               header: "",
               render: (r) => {
@@ -202,7 +211,9 @@ export function RunsPage({ session }: { session: Session }) {
             <>
               <ChangeTable changes={details.page.items} label={`Zmiany w przebiegu ${formatDate(details.run.started_at)}`} />
               {details.page.total > details.page.items.length && (
-                <p className="my-2 text-muted">Pokazano {details.page.items.length} z {details.page.total} (pełna lista w eksporcie).</p>
+                <p className="my-2 text-muted">
+                  {details.page.items.length}/{details.page.total}, pełna lista w eksporcie
+                </p>
               )}
             </>
           )}

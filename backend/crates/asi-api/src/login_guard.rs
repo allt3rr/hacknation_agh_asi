@@ -14,7 +14,7 @@ const WINDOW: Duration = Duration::from_secs(15 * 60);
 
 /// shortcut: liczniki w pamięci procesu, zerowane przy restarcie; przenieść do bazy przy wielu instancjach API.
 pub struct LoginGuard {
-    verifications: Semaphore,
+    verifications: std::sync::Arc<Semaphore>,
     dummy_hash: String,
     failures: Mutex<HashMap<String, (u32, Instant)>>,
 }
@@ -22,23 +22,24 @@ pub struct LoginGuard {
 impl LoginGuard {
     pub fn new() -> Result<Self> {
         Ok(Self {
-            verifications: Semaphore::new(MAX_PARALLEL_VERIFICATIONS),
+            verifications: std::sync::Arc::new(Semaphore::new(MAX_PARALLEL_VERIFICATIONS)),
             dummy_hash: password::hash_password(&password::new_token())?,
             failures: Mutex::default(),
         })
     }
 
     /// Weryfikuje hasło. Dla `None` (nieznane konto) liczy Argon2 na hashu zastępczym i zwraca `false`.
-    pub async fn verify(&self, password: String, hash: Option<String>) -> bool {
+    pub async fn verify(&self, password: String, hash: Option<String>) -> Option<bool> {
         let known = hash.is_some();
         let hash = hash.unwrap_or_else(|| self.dummy_hash.clone());
-        let Ok(_permit) = self.verifications.acquire().await else {
-            return false;
-        };
-        let ok = tokio::task::spawn_blocking(move || password::verify_password(&password, &hash))
-            .await
-            .unwrap_or(false);
-        ok && known
+        let permit = self.verifications.clone().try_acquire_owned().ok()?;
+        let ok = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            password::verify_password(&password, &hash)
+        })
+        .await
+        .ok()?;
+        Some(ok && known)
     }
 
     pub fn is_blocked(&self, keys: &[String]) -> bool {

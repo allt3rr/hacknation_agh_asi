@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
         .database_url
         .context("Brak DATABASE_URL (adres PostgreSQL)")?;
     let db = asi_db::connect(&url).await?;
-    asi_db::prepare(&db).await?;
+    asi_db::prepare(&db, std::env::var("ASI_ADMIN_PASSWORD").ok().as_deref()).await?;
 
     match cli.command {
         Command::Migrate => {

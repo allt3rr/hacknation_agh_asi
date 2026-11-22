@@ -3,10 +3,10 @@
 use anyhow::Result;
 use asi_core::model::Observation;
 use asi_crypto::{aad, FieldCrypto};
-use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sqlx::PgPool;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 pub fn decrypt_observation(crypto: &FieldCrypto, id: Uuid, data: &[u8]) -> Result<Observation> {
@@ -71,7 +71,8 @@ pub struct ChangeRow {
     pub field: Option<String>,
     pub before: Option<String>,
     pub after: Option<String>,
-    pub created_at: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
 }
 
 pub async fn changes_page(

@@ -5,7 +5,7 @@ import { DataTable } from "../components/DataTable";
 import { FilePicker } from "../components/FilePicker";
 import { useApiData, useNotice } from "../hooks";
 import { can } from "../permissions";
-import type { ImportSummary, Session, Target, TargetPatch } from "../types";
+import type { ImportSummary, Session, Target } from "../types";
 import { BTN_SECONDARY, fileFormat } from "../utils";
 
 const PLACEHOLDER = "10.0.0.0/24\n192.168.1.10\nintranet.example.pl";
@@ -55,10 +55,12 @@ export function TargetsPage({ session }: { session: Session }) {
             <button onClick={addManually} disabled={!text.trim()}>
               Dodaj ręcznie
             </button>
-            <span className="text-muted">albo plik: CSV (kolumny target, tags, note lub plik organizatora z kolumną ip_address), JSON lub TXT:</span>
+            <span className="text-xs text-muted" title="CSV: kolumny target, tags, note albo plik organizatora z kolumną ip_address">
+              plik CSV/JSON/TXT:
+            </span>
             <FilePicker accept=".csv,.json,.txt" label="Plik z celami (CSV, JSON lub TXT)" buttonLabel="Importuj plik" onSubmit={importFile} />
             <label className="text-muted">
-              <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} /> tylko sprawdź plik, bez zapisu
+              <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} /> dry run
             </label>
           </div>
         </Card>
@@ -84,14 +86,6 @@ interface TargetTableProps {
 }
 
 function TargetTable({ targets, session, onChanged, run }: TargetTableProps) {
-  const editable = can(session, "targets.update");
-
-  const update = (target: Target, patch: TargetPatch) =>
-    run(async () => {
-      await api.targets.update(target.id, patch);
-      await onChanged();
-    });
-
   const remove = (target: Target) =>
     run(async () => {
       if (!confirm(`Usunąć cel ${target.value}?`)) return;
@@ -105,64 +99,23 @@ function TargetTable({ targets, session, onChanged, run }: TargetTableProps) {
       rowKey={(t) => t.id}
       label="Lista celów"
       emptyText="Brak celów"
-      filterBy={(t) => [t.value, t.kind, ...t.tags, t.note].join(" ")}
+      filterBy={(t) => `${t.value} ${t.kind}`}
       columns={[
-        { header: "Cel", render: (t) => t.value },
-        { header: "Typ", render: (t) => t.kind },
-        {
-          header: "Tagi",
-          render: (t) =>
-            editable ? (
-              <EditableText
-                label={`Tagi celu ${t.value}`}
-                value={t.tags.join(", ")}
-                onSave={(value) => update(t, { tags: value.split(",").map((s) => s.trim()).filter(Boolean) })}
-              />
-            ) : (
-              t.tags.join(", ")
-            ),
-        },
-        {
-          header: "Notatka",
-          render: (t) => (editable ? <EditableText label={`Notatka celu ${t.value}`} value={t.note ?? ""} onSave={(note) => update(t, { note })} /> : t.note),
-        },
-        {
-          header: "Skanowany",
-          render: (t) => (
-            <input
-              type="checkbox"
-              aria-label={`Skanuj ${t.value}`}
-              checked={!t.excluded}
-              disabled={!editable}
-              onChange={(e) => update(t, { excluded: !e.target.checked })}
-            />
-          ),
-        },
-        {
-          header: "",
-          render: (t) =>
-            can(session, "targets.delete") && (
-              <button className={BTN_SECONDARY} aria-label={`Usuń cel ${t.value}`} onClick={() => remove(t)}>
-                Usuń
-              </button>
-            ),
-        },
+        { header: "Cel", mono: true, render: (t) => t.value },
+        { header: "Typ", render: (t) => (t.excluded ? `${t.kind} · wykluczony` : t.kind) },
+        ...(can(session, "targets.delete")
+          ? [
+              {
+                header: "",
+                render: (t: Target) => (
+                  <button className={BTN_SECONDARY} aria-label={`Usuń cel ${t.value}`} onClick={() => remove(t)}>
+                    Usuń
+                  </button>
+                ),
+              },
+            ]
+          : []),
       ]}
-    />
-  );
-}
-
-/** Pole tekstowe zapisywane po opuszczeniu (blur) lub Enter, tylko jeśli wartość się zmieniła. */
-export function EditableText({ value, onSave, label }: { value: string; onSave: (value: string) => void; label: string }) {
-  const [draft, setDraft] = useState(value);
-  return (
-    <input
-      aria-label={label}
-      title="Zapis po wyjściu z pola lub klawiszem Enter"
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-      onBlur={() => draft !== value && onSave(draft)}
     />
   );
 }

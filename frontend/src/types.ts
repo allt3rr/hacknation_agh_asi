@@ -57,6 +57,10 @@ export interface Run {
   started_at: string | null;
   finished_at: string | null;
   duration_ms: number | null;
+  /** Cele w kolejce przebiegu; w trakcie skanu aktualizowane co ~10 s. */
+  hosts_total: number;
+  /** Cele z zakończonych podgrup (≤ hosts_total). */
+  hosts_done: number;
   created_at: string;
 }
 

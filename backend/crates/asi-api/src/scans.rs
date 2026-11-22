@@ -13,20 +13,22 @@ use asi_scanner::config::{window_decision, ScanConfig, ScheduleConfig, WindowDec
 use asi_scanner::http::Limits;
 use asi_scanner::nmap::{AnyRunner, NmapOptions, NmapRunner};
 use asi_scanner::{CancellationToken, Plan, Scanner};
+use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use chrono::{Local, NaiveDateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
+use time::{OffsetDateTime, PrimitiveDateTime};
 use tokio::time::Instant;
 use uuid::Uuid;
 
-pub type Clock = Arc<dyn Fn() -> NaiveDateTime + Send + Sync>;
+pub type Clock = Arc<dyn Fn() -> Option<PrimitiveDateTime> + Send + Sync>;
 
 pub struct ScanService {
     /// Błąd konfiguracji (np. błędne okno) blokuje każdy start z komunikatem.
@@ -53,7 +55,11 @@ impl ScanService {
             runner: Arc::new(runner),
             signatures_dir,
             owner: format!("asi-{}", Uuid::new_v4()),
-            clock: Arc::new(|| Local::now().naive_local()),
+            clock: Arc::new(|| {
+                OffsetDateTime::now_local()
+                    .ok()
+                    .map(|t| PrimitiveDateTime::new(t.date(), t.time()))
+            }),
             active: Mutex::default(),
             schedule: RwLock::new(schedule),
         }
@@ -93,7 +99,15 @@ impl Default for ScanService {
 }
 
 /// Start przebiegu. `Err(msg)` = odmowa (409): trwa skan, poza oknem, błędna konfiguracja, brak celów.
-pub async fn start_run(st: &AppState, triggered_by: Option<Uuid>) -> Result<Uuid, StartError> {
+/// `selection`: tylko te cele (id z `targets`); `None` = wszystkie niewykluczone (harmonogram).
+pub async fn start_run(
+    st: &AppState,
+    triggered_by: Option<Uuid>,
+    selection: Option<&[Uuid]>,
+) -> Result<Uuid, StartError> {
+    if selection.is_some_and(|ids| ids.is_empty()) {
+        return Err(StartError::BadRequest("Pusta lista celów".into()));
+    }
     let svc = st.scans.clone();
     let cfg = svc
         .cfg
@@ -103,7 +117,7 @@ pub async fn start_run(st: &AppState, triggered_by: Option<Uuid>) -> Result<Uuid
         .schedule()
         .windows()
         .map_err(|e| StartError::Refused(format!("Błędne okno czasowe: {e:#}")))?;
-    let now = (svc.clock)();
+    let now = (svc.clock)().ok_or_else(|| StartError::Refused("Nieznany czas lokalny".into()))?;
     let deadline = match window_decision(&windows, now) {
         WindowDecision::Unrestricted => None,
         WindowDecision::Closed => {
@@ -112,12 +126,12 @@ pub async fn start_run(st: &AppState, triggered_by: Option<Uuid>) -> Result<Uuid
             ))
         }
         WindowDecision::Until(end) => {
-            let left = (end - now).to_std().unwrap_or_default();
+            let left = std::time::Duration::try_from(end - now).unwrap_or_default();
             Some(Instant::now() + left)
         }
     };
 
-    let targets = load_targets(st).await?;
+    let targets = load_targets(st, selection).await?;
     let expanded =
         expand(&targets, cfg.max_targets).map_err(|e| StartError::Refused(e.to_string()))?;
     if expanded.is_empty() {
@@ -142,7 +156,8 @@ pub async fn start_run(st: &AppState, triggered_by: Option<Uuid>) -> Result<Uuid
             .collect();
     let signatures = load_signatures(st, &svc).await?;
 
-    let profile = json!({ "config": cfg, "targets": expanded.len(), "resumed": attempts.len() });
+    let profile = json!({ "config": cfg, "targets": expanded.len(), "resumed": attempts.len(),
+                          "selected": selection.map(<[Uuid]>::len) });
     let run_id = runs::reserve_scan(&st.db, &svc.owner, triggered_by, &profile)
         .await?
         .ok_or_else(|| StartError::Refused("Trwa inny skan".into()))?;
@@ -167,6 +182,8 @@ pub async fn start_run(st: &AppState, triggered_by: Option<Uuid>) -> Result<Uuid
 
 #[derive(Debug)]
 pub enum StartError {
+    /// Błędne żądanie (400): pusta lista lub nieznany cel.
+    BadRequest(String),
     Refused(String),
     Internal(anyhow::Error),
 }
@@ -177,10 +194,27 @@ impl<E: Into<anyhow::Error>> From<E> for StartError {
     }
 }
 
-async fn load_targets(st: &AppState) -> anyhow::Result<Vec<Target>> {
+/// Cele do skanu. Przy wyborze nieznane id → 400; wykluczone są pomijane zawsze.
+async fn load_targets(
+    st: &AppState,
+    selection: Option<&[Uuid]>,
+) -> Result<Vec<Target>, StartError> {
+    if let Some(ids) = selection {
+        let unique: HashSet<&Uuid> = ids.iter().collect();
+        let known: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM targets WHERE id = ANY($1)")
+            .bind(ids)
+            .fetch_one(&st.db)
+            .await?;
+        if known != unique.len() as i64 {
+            return Err(StartError::BadRequest("Nieznany cel".into()));
+        }
+    }
     let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT kind, value FROM targets WHERE NOT excluded ORDER BY created_at, value",
+        "SELECT kind, value FROM targets
+         WHERE NOT excluded AND ($1::uuid[] IS NULL OR id = ANY($1))
+         ORDER BY created_at, value",
     )
+    .bind(selection)
     .fetch_all(&st.db)
     .await?;
     Ok(rows
@@ -225,31 +259,35 @@ async fn execute(
     token: CancellationToken,
 ) {
     let owner = st.scans.owner.clone();
+    let scanner = match Scanner::new(cfg.clone(), st.scans.runner.clone(), signatures) {
+        Ok(s) => s,
+        Err(e) => {
+            let _ =
+                runs::finish_failed(&st.db, run_id, &owner, &format!("błąd skanera: {e}")).await;
+            return;
+        }
+    };
+    // heartbeat przedłuża dzierżawę i przy okazji zapisuje postęp do scan_runs.hosts_*
     let heartbeat = {
         let (db, owner, token) = (st.db.clone(), owner.clone(), token.clone());
+        let (progress, total) = (scanner.progress(), plan.queue.len() as i32);
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     _ = tokio::time::sleep(Duration::from_secs(HEARTBEAT_SECS)) => {}
                     _ = token.cancelled() => return,
                 }
-                if !runs::heartbeat(&db, run_id, &owner).await.unwrap_or(false) {
+                let done = progress.load(Ordering::Relaxed) as i32;
+                if !runs::heartbeat(&db, run_id, &owner, total, done)
+                    .await
+                    .unwrap_or(false)
+                {
                     tracing::warn!(%run_id, "utracona dzierżawa lub anulowanie: przerywam skan");
                     token.cancel();
                     return;
                 }
             }
         })
-    };
-
-    let scanner = match Scanner::new(cfg.clone(), st.scans.runner.clone(), signatures) {
-        Ok(s) => s,
-        Err(e) => {
-            heartbeat.abort();
-            let _ =
-                runs::finish_failed(&st.db, run_id, &owner, &format!("błąd skanera: {e}")).await;
-            return;
-        }
     };
     let limits = Limits {
         deadline,
@@ -315,14 +353,14 @@ async fn execute(
 
 /// Czy harmonogram powinien uruchomić skan: brak skanów, zaległości (`partial`/`failed`) albo minął odstęp.
 pub fn is_due(
-    last: Option<(chrono::DateTime<Utc>, String)>,
+    last: Option<(time::OffsetDateTime, String)>,
     every_hours: i64,
-    now: chrono::DateTime<Utc>,
+    now: time::OffsetDateTime,
 ) -> bool {
     match last {
         None => true,
         Some((_, status)) if status == "partial" || status == "failed" => true,
-        Some((started, _)) => (now - started).num_hours() >= every_hours,
+        Some((started, _)) => (now - started).whole_hours() >= every_hours,
     }
 }
 
@@ -331,7 +369,9 @@ pub async fn load_saved_schedule(st: &AppState) {
     match asi_db::schedule::load(&st.db).await {
         Ok(Some(value)) => match serde_json::from_value::<ScheduleConfig>(value) {
             Ok(saved) if validate_schedule(&saved).is_ok() => st.scans.set_schedule(saved),
-            _ => tracing::error!("zapisany harmonogram jest niepoprawny; używam konfiguracji z pliku"),
+            _ => tracing::error!(
+                "zapisany harmonogram jest niepoprawny; używam konfiguracji z pliku"
+            ),
         },
         Ok(None) => {}
         Err(e) => tracing::error!(error = %e, "harmonogram: błąd odczytu bazy"),
@@ -360,12 +400,12 @@ pub async fn scheduler(st: AppState) {
                 continue;
             }
         };
-        if !is_due(last, schedule.every_hours, Utc::now()) {
+        if !is_due(last, schedule.every_hours, OffsetDateTime::now_utc()) {
             continue;
         }
-        match start_run(&st, None).await {
+        match start_run(&st, None, None).await {
             Ok(id) => tracing::info!(%id, "harmonogram: start skanu"),
-            Err(StartError::Refused(msg)) => {
+            Err(StartError::Refused(msg) | StartError::BadRequest(msg)) => {
                 tracing::debug!(%msg, "harmonogram: skan nie wystartował")
             }
             Err(StartError::Internal(e)) => tracing::error!(error = %e, "harmonogram: błąd startu"),
@@ -383,7 +423,10 @@ fn validate_schedule(s: &ScheduleConfig) -> Result<(), String> {
     s.windows().map(|_| ()).map_err(|e| format!("{e:#}"))
 }
 
-pub async fn get_schedule(State(st): State<AppState>, user: AuthUser) -> ApiResult<Json<ScheduleConfig>> {
+pub async fn get_schedule(
+    State(st): State<AppState>,
+    user: AuthUser,
+) -> ApiResult<Json<ScheduleConfig>> {
     user.require(rbac::READ)?;
     Ok(Json(st.scans.schedule()))
 }
@@ -418,6 +461,7 @@ async fn record(
     ip: &ClientIp,
     action: &str,
     id: Uuid,
+    details: serde_json::Value,
 ) -> ApiResult<()> {
     let entry = Entry {
         user_id: Some(user.0.id),
@@ -426,22 +470,39 @@ async fn record(
         entity: Some("scan_run"),
         entity_id: Some(id.to_string()),
         ip: ip.0.map(|i| i.to_string()),
-        details: json!({}),
+        details,
     };
     Ok(audit::record(&st.db, entry).await?)
+}
+
+#[derive(Deserialize)]
+pub struct StartBody {
+    /// Id celów do tego przebiegu; brak = wszystkie niewykluczone.
+    target_ids: Option<Vec<Uuid>>,
 }
 
 pub async fn post_run(
     State(st): State<AppState>,
     user: AuthUser,
     ip: ClientIp,
+    body: Bytes,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
     user.require(rbac::SCANS_RUN)?;
-    match start_run(&st, Some(user.0.id)).await {
+    // puste body = wszystkie cele; błędny JSON lub UUID = 400 (nie 422 z ekstraktora Json)
+    let selection = if body.iter().all(u8::is_ascii_whitespace) {
+        None
+    } else {
+        serde_json::from_slice::<StartBody>(&body)
+            .map_err(|e| ApiError::BadRequest(format!("Błędne body: {e}")))?
+            .target_ids
+    };
+    match start_run(&st, Some(user.0.id), selection.as_deref()).await {
         Ok(id) => {
-            record(&st, &user, &ip, "run.start", id).await?;
+            let details = json!({ "selected": selection.as_ref().map(Vec::len) });
+            record(&st, &user, &ip, "run.start", id, details).await?;
             Ok((StatusCode::ACCEPTED, Json(json!({ "run_id": id }))))
         }
+        Err(StartError::BadRequest(msg)) => Err(ApiError::BadRequest(msg)),
         Err(StartError::Refused(msg)) => Err(ApiError::Conflict(msg)),
         Err(StartError::Internal(e)) => Err(ApiError::Internal(e)),
     }
@@ -492,7 +553,7 @@ pub async fn cancel_run(
     if let Some(token) = st.scans.active.lock().unwrap().get(&id) {
         token.cancel();
     }
-    record(&st, &user, &ip, "run.cancel", id).await?;
+    record(&st, &user, &ip, "run.cancel", id, json!({})).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -502,17 +563,17 @@ mod tests {
 
     #[test]
     fn due_rules() {
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
         assert!(is_due(None, 24, now));
         assert!(is_due(Some((now, "partial".into())), 24, now));
         assert!(is_due(Some((now, "failed".into())), 24, now));
         assert!(!is_due(
-            Some((now - chrono::Duration::hours(3), "done".into())),
+            Some((now - time::Duration::hours(3), "done".into())),
             24,
             now
         ));
         assert!(is_due(
-            Some((now - chrono::Duration::hours(25), "done".into())),
+            Some((now - time::Duration::hours(25), "done".into())),
             24,
             now
         ));

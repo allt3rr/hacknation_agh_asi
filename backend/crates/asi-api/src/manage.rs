@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 pub const MIN_PASSWORD_LENGTH: usize = 10;
 
-async fn record(
-    st: &AppState,
+async fn record<'c>(
+    db: impl sqlx::PgExecutor<'c>,
     user: &AuthUser,
     ip: &ClientIp,
     action: &str,
@@ -34,7 +34,7 @@ async fn record(
         ip: ip.0.map(|i| i.to_string()),
         details,
     };
-    Ok(audit::record(&st.db, entry).await?)
+    Ok(audit::record(db, entry).await?)
 }
 
 // --- Cele ---------------------------------------------------------------------
@@ -151,7 +151,7 @@ pub async fn add_targets(
     }
     let summary = save(&st, &user, report, "manual", false).await?;
     record(
-        &st,
+        &st.db,
         &user,
         &ip,
         "target.create",
@@ -182,7 +182,7 @@ pub async fn import_targets(
     if !q.dry_run {
         let details =
             json!({ "format": source, "rows": summary.rows, "accepted": summary.accepted });
-        record(&st, &user, &ip, "target.import", "target", None, details).await?;
+        record(&st.db, &user, &ip, "target.import", "target", None, details).await?;
     }
     Ok(Json(summary))
 }
@@ -207,7 +207,7 @@ pub async fn update_target(
     .flatten()
     .collect();
     record(
-        &st,
+        &st.db,
         &user,
         &ip,
         "target.update",
@@ -230,7 +230,7 @@ pub async fn delete_target(
         return Err(ApiError::NotFound);
     }
     record(
-        &st,
+        &st.db,
         &user,
         &ip,
         "target.delete",
@@ -299,7 +299,8 @@ pub async fn create_user(
     }
     check_role(&req.role)?;
     let hash = hash_new_password(req.password).await?;
-    let id = match asi_db::users::create_user(&st.db, username, &hash, &req.role).await {
+    let mut tx = st.db.begin().await?;
+    let id = match asi_db::users::create_user(&mut *tx, username, &hash, &req.role).await {
         Ok(id) => id,
         Err(e) if asi_db::users::is_unique_violation(&e) => {
             return Err(ApiError::Conflict(
@@ -310,7 +311,7 @@ pub async fn create_user(
     };
     let details = json!({ "username": username, "role": req.role });
     record(
-        &st,
+        &mut *tx,
         &user,
         &ip,
         "user.create",
@@ -319,6 +320,7 @@ pub async fn create_user(
         details,
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({ "id": id })))
 }
 
@@ -360,10 +362,11 @@ pub async fn update_user(
         password_hash,
         disabled: req.disabled,
     };
-    outcome(asi_db::users::update_user(&st.db, id, &update).await?)?;
+    let mut tx = st.db.begin().await?;
+    outcome(asi_db::users::update_user(&mut *tx, id, &update).await?)?;
     let details = json!({ "fields": fields, "role": req.role, "disabled": req.disabled });
     record(
-        &st,
+        &mut *tx,
         &user,
         &ip,
         "user.update",
@@ -372,6 +375,7 @@ pub async fn update_user(
         details,
     )
     .await?;
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -382,9 +386,9 @@ pub async fn delete_user(
     Path(id): Path<Uuid>,
 ) -> ApiResult<StatusCode> {
     user.require(rbac::ADMIN_USERS)?;
-    outcome(asi_db::users::delete_user(&st.db, id).await?)?;
+    let mut tx = st.db.begin().await?;
     record(
-        &st,
+        &mut *tx,
         &user,
         &ip,
         "user.delete",
@@ -393,6 +397,8 @@ pub async fn delete_user(
         json!({}),
     )
     .await?;
+    outcome(asi_db::users::delete_user(&mut *tx, id).await?)?;
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

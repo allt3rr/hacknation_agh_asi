@@ -140,9 +140,14 @@ impl HttpProber {
             let Some(loc) = resp.headers().get(LOCATION).and_then(|v| v.to_str().ok()) else {
                 break;
             };
-            let Ok(next) = url.join(loc) else {
+            let Ok(mut next) = url.join(loc) else {
                 break;
             };
+            // Domena pierwotnego celu pozostaje przypięta do sprawdzonego IP.
+            // Pozostałe nazwy nie mają tu wiarygodnego przypisania do adresu.
+            if host.is_some() && next.host_str() == host {
+                next.set_host(base.host_str())?;
+            }
             if scope.check(&next).is_err() {
                 info.blocked_redirects.push(next.to_string());
                 break;

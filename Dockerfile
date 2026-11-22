@@ -2,7 +2,7 @@
 # Obraz ASI: backend (backend/, PostgreSQL) ze skanerem nmap i zbudowanym interfejsem z tego samego originu.
 
 # Etap 1: interfejs (React + Vite) z lockfile.
-FROM node:20-alpine AS frontend
+FROM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS frontend
 WORKDIR /frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
@@ -10,7 +10,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Etap 2: backend (Rust, statyczna binarka musl) z wersjonowanego Cargo.lock.
-FROM rust:1-alpine3.22 AS backend
+FROM rust:1-alpine3.22@sha256:f8ddfd4b265d9a9e7fd7c36821af4a55771aee2ac3894294687a66c709319be9 AS backend
 RUN apk add --no-cache musl-dev
 WORKDIR /src
 COPY backend/ ./
@@ -21,10 +21,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
  && cp /src/target/release/asi /usr/local/bin/asi
 
 # Etap 3: obraz uruchomieniowy na wspieranym Alpine, bez roota.
-FROM alpine:3.22
+FROM alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f
 # nmap-nselibs + nmap-scripts: -sV inicjuje silnik NSE (nse_main.lua i katalog scripts);
 # skryptów nie uruchamiamy (brak --script), więc to nie zwiększa intensywności skanu
-RUN apk add --no-cache nmap nmap-nselibs nmap-scripts ca-certificates \
+RUN apk add --no-cache "zlib>=1.4-r0" nmap nmap-nselibs nmap-scripts ca-certificates \
  && adduser -S -D -H -u 10001 -h /app -s /sbin/nologin asi
 WORKDIR /app
 COPY --from=backend /usr/local/bin/asi /usr/local/bin/asi

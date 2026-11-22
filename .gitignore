@@ -27,7 +27,7 @@ AGH - Pełna treść zadania konkursowego.pdf
 AGH - Regulamin zadania konkursowego.pdf
 
 node_modules/
-Cargo.lock
+!Cargo.lock
 # lockfile nowego backendu wersjonujemy (powtarzalny build, cargo --locked)
 !backend/Cargo.lock
 CLAUDE.md

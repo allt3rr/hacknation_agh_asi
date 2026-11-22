@@ -96,13 +96,8 @@ impl Scope {
         let ip = match url.host() {
             Some(Host::Ipv4(ip)) => IpAddr::V4(ip),
             Some(Host::Ipv6(ip)) => IpAddr::V6(ip),
-            Some(Host::Domain(name)) if self.is_domain_target(name) => {
-                // domena-cel: port musi być dozwolony albo wykryty na którymś z jej adresów
-                return self
-                    .port_allowed_any(port)
-                    .then_some(())
-                    .context("port poza zakresem");
-            }
+            // Połączenia wykonujemy wyłącznie na sprawdzony adres IP.
+            // Nazwa z przekierowania wymagałaby ponownego rozwiązania DNS.
             _ => bail!("host {:?} poza zakresem", url.host_str()),
         };
         if !self.ip_in_scope(ip) {
@@ -117,13 +112,6 @@ impl Scope {
             bail!("port {port} na {ip} poza zakresem");
         }
         Ok(())
-    }
-
-    fn port_allowed_any(&self, port: u16) -> bool {
-        self.allowed_ports
-            .as_ref()
-            .is_some_and(|p| p.contains(port))
-            || self.open.values().any(|p| p.contains(&port))
     }
 }
 
@@ -154,13 +142,17 @@ mod tests {
         assert!(ok(&s, "https://10.0.0.7:9443/x"));
         assert!(ok(&s, "http://192.168.1.5:8005/"));
         assert!(ok(&s, "https://172.16.0.1/"));
-        assert!(ok(&s, "https://Intranet.AGH.edu.pl/"));
+        assert!(
+            !ok(&s, "https://Intranet.AGH.edu.pl/"),
+            "połączenie wymaga sprawdzonego IP"
+        );
 
         assert!(
             !ok(&s, "http://10.0.0.8:9443/"),
             "port wykryty tylko na innym hoście"
         );
         assert!(!ok(&s, "http://10.0.1.1/"), "adres poza CIDR");
+        assert!(!ok(&s, "http://intranet.agh.edu.pl:9443/"));
         assert!(!ok(&s, "http://example.com/"), "obca domena");
         assert!(!ok(&s, "ftp://10.0.0.7/"), "schemat");
         assert!(!ok(&s, "http://10.0.0.7:22/"), "port niedozwolony");

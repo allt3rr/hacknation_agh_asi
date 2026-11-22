@@ -3,9 +3,9 @@
 use anyhow::Result;
 use asi_core::targets::Target;
 use asi_crypto::{aad, FieldCrypto};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
@@ -17,8 +17,10 @@ pub struct TargetView {
     pub excluded: bool,
     pub tags: Vec<String>,
     pub note: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
 }
 
 #[derive(sqlx::FromRow)]
@@ -30,8 +32,8 @@ struct TargetRow {
     excluded: bool,
     tags: Vec<String>,
     note_enc: Option<Vec<u8>>,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
+    created_at: OffsetDateTime,
+    updated_at: OffsetDateTime,
 }
 
 /// Pusty string w `note` usuwa notatkę.

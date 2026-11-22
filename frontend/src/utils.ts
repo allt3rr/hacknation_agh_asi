@@ -1,4 +1,4 @@
-import type { Coverage, FileFormat, RunStatus } from "./types";
+import type { Coverage, FileFormat, Run, RunStatus } from "./types";
 
 /** Klasy przycisku drugorzędnego (obramowany, bez tła). */
 export const BTN_SECONDARY = "border border-line bg-surface px-2.5 py-1 text-fg shadow-none hover:border-accent hover:text-accent";
@@ -64,4 +64,49 @@ export function coverageText(c: Coverage): string {
     .join(", ");
 }
 
-export const BADGE = "mr-1 my-px inline-flex items-center rounded-full border border-accent/25 bg-accent/10 px-2 py-px text-xs font-medium text-fg";
+export const BADGE = "mr-1 my-px inline-flex items-center whitespace-nowrap rounded-full border border-accent/25 bg-accent/10 px-2 py-px text-xs font-medium text-fg";
+
+export interface Progress {
+  /** 0–100 albo null, gdy plan nie jest jeszcze znany (`hosts_total = 0`). */
+  percent: number | null;
+  /** Liniowe oszacowanie pozostałego czasu; null przed pierwszą zakończoną podgrupą. */
+  etaMs: number | null;
+  elapsedMs: number;
+}
+
+export function progressEta(run: Pick<Run, "hosts_total" | "hosts_done" | "started_at" | "created_at">, now: number): Progress {
+  const { hosts_total: total, hosts_done: done } = run;
+  const elapsedMs = Math.max(0, now - new Date(run.started_at ?? run.created_at).getTime());
+  if (total <= 0) return { percent: null, etaMs: null, elapsedMs };
+  const percent = Math.min(100, Math.floor((done / total) * 100));
+  const etaMs = done > 0 ? Math.round((elapsedMs * Math.max(0, total - done)) / done) : null;
+  return { percent, etaMs, elapsedMs };
+}
+
+if (import.meta.env.DEV) {
+  const at = (total: number, done: number) => progressEta({ hosts_total: total, hosts_done: done, started_at: "2026-01-01T00:00:00Z", created_at: "" }, Date.parse("2026-01-01T00:01:00Z"));
+  console.assert(at(0, 0).percent === null && at(0, 0).etaMs === null, "progressEta 0/0");
+  console.assert(at(10, 0).percent === 0 && at(10, 0).etaMs === null, "progressEta 0/N");
+  console.assert(at(10, 5).percent === 50 && at(10, 5).etaMs === 60_000, "progressEta N/2N");
+  console.assert(at(10, 10).percent === 100 && at(10, 10).etaMs === 0, "progressEta N/N");
+}
+
+/** „Zaznacz wszystkie” dla wyników wyszukiwania: gdy wszystkie są zaznaczone, odznacza tylko je; elementów spoza nie rusza. */
+export function toggleAll(selected: ReadonlySet<string>, filteredIds: readonly string[]): Set<string> {
+  const next = new Set(selected);
+  const allOn = filteredIds.length > 0 && filteredIds.every((id) => next.has(id));
+  for (const id of filteredIds) {
+    if (allOn) next.delete(id);
+    else next.add(id);
+  }
+  return next;
+}
+
+if (import.meta.env.DEV) {
+  const s = (...ids: string[]) => new Set(ids);
+  const eq = (a: Set<string>, b: string[]) => a.size === b.length && b.every((x) => a.has(x));
+  console.assert(eq(toggleAll(s("x"), ["a", "b"]), ["x", "a", "b"]), "toggleAll: dodaje wyniki, zostawia x");
+  console.assert(eq(toggleAll(s("x", "a"), ["a", "b"]), ["x", "a", "b"]), "toggleAll: częściowe → wszystkie");
+  console.assert(eq(toggleAll(s("x", "a", "b"), ["a", "b"]), ["x"]), "toggleAll: wszystkie → odznacza tylko wyniki");
+  console.assert(eq(toggleAll(s("x"), []), ["x"]), "toggleAll: puste wyniki bez zmian");
+}
